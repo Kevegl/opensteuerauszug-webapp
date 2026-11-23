@@ -4,8 +4,7 @@ Lokale Weboberfläche (Deutsch), die das Tool [opensteuerauszug](https://github.
 
 ## Einrichtung
 
-1. Voraussetzung: Python 3.12 und das Tool-Repo mit installiertem venv, Standard `%USERPROFILE%\opensteuerauszug` (`.venv`, `config.toml`, `data\security_identifiers.csv`). Der Pfad ist in der Oberfläche (Abschnitt Flex Web Service, Feld Tool-Ordner) oder in `settings.json` änderbar; alternativ setzt die Umgebungsvariable `OPENSTEUER_TOOL_REPO` den Standard.
-   Das Tool von <https://github.com/vroonhof/opensteuerauszug> muss vorher installiert sein (Repo nach `%USERPROFILE%\opensteuerauszug` klonen, eigenes venv anlegen). Bekannter Fix: in dessen `pyproject.toml` die Abhängigkeit `ibflex` durch `ibflex2` ersetzen.
+1. Voraussetzung: Python 3.12 (und optional git; ohne git lädt die App das Tool als ZIP). Das Tool [opensteuerauszug](https://github.com/vroonhof/opensteuerauszug) installiert die App auf Knopfdruck: Im Bereich "Tool" erscheint bei fehlendem Tool "Tool installieren", sonst "Tool aktualisieren". Eine bestehende Installation unter `%USERPROFILE%\opensteuerauszug` (mit `.venv`) wird automatisch genutzt; sonst installiert die App nach `tool\opensteuerauszug` im Projektordner. Ein eigener Pfad ist in der Oberfläche (Feld Tool-Ordner) oder in `settings.json` setzbar, alternativ per Umgebungsvariable `OPENSTEUER_TOOL_REPO`. Der bekannte ibflex-Fix (`ibflex` durch `ibflex2` in dessen `pyproject.toml`) wird bei Installation und Update automatisch erledigt, sofern Upstream ihn nicht schon enthält: Upstream hat den `ibflex2`-Eintrag inzwischen selbst, der automatische Fix greift nur noch bei älteren Ständen. Eine bestehende ältere Installation lässt sich in der App über "Tool aktualisieren" auf den neuesten Stand bringen. Ein lokal angewendeter ibflex-Fix wird dabei automatisch zurückgesetzt, untracked Dateien bleiben unberührt. Beim Update werden `config.toml`, `data\security_identifiers.csv` und eigene Dateien nie gelöscht (bei ZIP-Installationen entfallen nur *.py unter `src\`, die Upstream entfernt hat; bei einem Fehler wird der Ausgangszustand wiederhergestellt).
 2. Doppelklick auf `start.bat`. Das Skript legt `.venv` an, installiert `requirements.txt`, startet den Server auf `http://127.0.0.1:8765` und öffnet den Browser.
 
 Der Server bindet ausschliesslich an 127.0.0.1. Persönliche Daten (`settings.json`, `work\`, `output\`) sind per `.gitignore` ausgeschlossen. Der Flex-Token liegt im Klartext in `settings.json`, wird aber nie geloggt und in der UI nur maskiert angezeigt.
@@ -20,7 +19,7 @@ Der Server bindet ausschliesslich an 127.0.0.1. Persönliche Daten (`settings.js
 
 ## Bedienung
 
-- **Status**: Das Badge oben zeigt, ob das Tool-venv gefunden wird und `opensteuerauszug` importierbar ist.
+- **Status**: Das Badge oben zeigt, ob das Tool-venv gefunden wird und `opensteuerauszug` importierbar ist. Der Bereich "Tool" zeigt Ordner, Herkunft, Installationsart und Stand und bietet Installieren bzw. Aktualisieren.
 - **Kurslisten**: Tabelle der Jahre ab 2020 mit Status (nicht vorhanden / XML / XML + SQLite). "Herunterladen/Aktualisieren" startet einen Hintergrundjob mit Live-Log. Scheitert die SQLite-Konvertierung (bekannter Fehler `UNIQUE constraint failed: signs.kl_id`, z.B. 2025), wird die halbfertige `.sqlite` gelöscht und das Jahr als "XML" behandelt.
 - **IBKR-Daten**: Flex-XML per Drag&Drop hochladen oder per Flex Web Service abrufen (Token und Query-IDs unter "Flex Web Service" speichern).
 - **Steuerauszug erzeugen**: Jahr wählen (Standard Vorjahr), Dateien ankreuzen, "Steuerauszug erzeugen". Fehlt die Kursliste, wird sie zuerst geladen. Ergebnisse: `output\<Jahr>\Steuerauszug_<Konto>_<Jahr>.pdf/.xml`.

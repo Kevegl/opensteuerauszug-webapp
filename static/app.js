@@ -26,6 +26,12 @@ async function loadStatus() {
   const b = $("#status");
   b.textContent = st.ok ? "Tool bereit" : "Tool: " + st.message;
   b.className = "badge " + (st.ok ? "ok" : "err");
+  const SRC = { settings: "Einstellungen", env: "Umgebungsvariable", home: "Benutzerordner", app: "App-eigener Ordner" };
+  const KIND = { git: "Git", zip: "ZIP", unknown: "unbekannt" };
+  $("#tool-info").textContent = `Ordner: ${st.tool_repo} (${SRC[st.tool_source] || st.tool_source})` +
+    (st.ok ? ` | Installationsart: ${KIND[st.install_kind] || "-"} | Stand: ${st.version || "unbekannt"}` : " | nicht installiert oder nicht funktionsfähig");
+  $("#btn-tool-install").hidden = st.ok;
+  $("#btn-tool-update").hidden = !st.ok;
   if (!$("#year").options.length) {
     const cur = new Date().getFullYear();
     for (let y = cur; y >= 2020; y--) $("#year").add(new Option(y, y));
@@ -103,7 +109,7 @@ async function runJob(path, body) {
     }
   } catch (e) { log("FEHLER: " + e.message); }
   setBusy(false);
-  loadKursliste().catch(() => {}); loadHistory(); loadFiles();
+  loadStatus().catch(() => {}); loadKursliste().catch(() => {}); loadHistory(); loadFiles();
 }
 
 async function upload(fileList) {
@@ -114,6 +120,8 @@ async function upload(fileList) {
 }
 
 $("#btn-all").onclick = () => runJob("/api/workflow/all", { year: year() });
+$("#btn-tool-install").onclick = () => runJob("/api/tool/install", {});
+$("#btn-tool-update").onclick = () => runJob("/api/tool/update", {});
 $("#btn-flex").onclick = () => runJob("/api/flex/fetch", { year: year() });
 $("#btn-generate").onclick = () => {
   const files = [...document.querySelectorAll(".sel:checked")].map((c) => c.value);

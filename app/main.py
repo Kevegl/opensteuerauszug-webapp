@@ -10,7 +10,7 @@ from fastapi import Body, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import kursliste, runner, settings as st, workflow
+from . import kursliste, runner, settings as st, toolsetup, workflow
 from .jobs import JobManager
 
 STATIC_DIR = st.BASE_DIR / "static"
@@ -45,10 +45,25 @@ def _start(kind: str, title: str, func):
 def api_status():
     s = _settings()
     info = runner.check_tool(s["tool_repo"])
+    info.update(toolsetup.describe(s["tool_repo"], s.get("tool_repo_source", "settings")))
     info["default_year"] = dt.date.today().year - 1
     running = jobs.running()
     info["running_job"] = running.id if running else None
     return info
+
+
+@app.post("/api/tool/install")
+def api_tool_install(body: dict = Body(default={})):
+    s = _settings()
+    if not body.get("force") and runner.check_tool(s["tool_repo"])["ok"]:
+        raise HTTPException(409, "Das Tool ist bereits installiert und funktionsfähig.")
+    return _start("tool-install", "Tool installieren", toolsetup.job_install(s))
+
+
+@app.post("/api/tool/update")
+def api_tool_update():
+    s = _settings()
+    return _start("tool-update", "Tool aktualisieren", toolsetup.job_update(s))
 
 
 @app.get("/api/settings")
