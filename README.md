@@ -2,6 +2,8 @@
 
 Lokale Weboberfläche (Deutsch), die das Tool [opensteuerauszug](https://github.com/vroonhof/opensteuerauszug) automatisiert: Kursliste laden, IBKR-Flex-Daten holen oder hochladen, Schweizer Steuerauszug (PDF + XML) erzeugen. Das Tool selbst wird nur per Subprozess mit seinem eigenen venv aufgerufen und nie verändert.
 
+> **Haftungsausschluss:** Dieses Projekt ist ein privates Hilfswerkzeug und steht in keiner Verbindung zur Eidgenössischen Steuerverwaltung (ESTV), zu Interactive Brokers oder zu den Autoren von opensteuerauszug. Es ist keine Steuerberatung. Die Nutzung erfolgt ohne Gewähr und auf eigene Verantwortung: Die erzeugten Steuerauszüge können fehlerhaft oder unvollständig sein. Prüfe sie vor der Einreichung immer selbst, insbesondere gegen dein IBKR Activity Statement und bei Kapitalmassnahmen. Massgeblich sind allein deine eigenen Angaben gegenüber der Steuerbehörde.
+
 ## Einrichtung
 
 1. Voraussetzung: Python 3.12 (und optional git; ohne git lädt die App das Tool als ZIP). Das Tool [opensteuerauszug](https://github.com/vroonhof/opensteuerauszug) installiert die App auf Knopfdruck: Im Bereich "Tool" erscheint bei fehlendem Tool "Tool installieren", sonst "Tool aktualisieren". Eine bestehende Installation unter `%USERPROFILE%\opensteuerauszug` (mit `.venv`) wird automatisch genutzt; sonst installiert die App nach `tool\opensteuerauszug` im Projektordner. Ein eigener Pfad ist in der Oberfläche (Feld Tool-Ordner) oder in `settings.json` setzbar, alternativ per Umgebungsvariable `OPENSTEUER_TOOL_REPO`. Der bekannte ibflex-Fix (`ibflex` durch `ibflex2` in dessen `pyproject.toml`) wird bei Installation und Update automatisch erledigt, sofern Upstream ihn nicht schon enthält: Upstream hat den `ibflex2`-Eintrag inzwischen selbst, der automatische Fix greift nur noch bei älteren Ständen. Eine bestehende ältere Installation lässt sich in der App über "Tool aktualisieren" auf den neuesten Stand bringen. Ein lokal angewendeter ibflex-Fix wird dabei automatisch zurückgesetzt, untracked Dateien bleiben unberührt. Beim Update werden `config.toml`, `data\security_identifiers.csv` und eigene Dateien nie gelöscht (bei ZIP-Installationen entfallen nur *.py unter `src\`, die Upstream entfernt hat; bei einem Fehler wird der Ausgangszustand wiederhergestellt).
@@ -33,3 +35,7 @@ Es läuft immer nur ein Job gleichzeitig.
 `.venv\Scripts\python.exe -m pytest tests`
 
 Optionale Regressionstests mit echten Flex-XML-Dateien: Umgebungsvariable `OPENSTEUER_REAL_DATA_DIR` auf einen Ordner setzen; alle `*.xml` darin werden nur lesend getestet. Ohne Variable oder ohne Dateien werden diese Tests übersprungen.
+
+## Lizenz
+
+[MIT](LICENSE). opensteuerauszug selbst steht unter eigener Lizenz (ebenfalls MIT, siehe dort) und ist nicht Teil dieses Repos; die App ruft es nur als separates Programm auf.
