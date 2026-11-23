@@ -32,6 +32,19 @@ async function loadStatus() {
     (st.ok ? ` | Installationsart: ${KIND[st.install_kind] || "-"} | Stand: ${st.version || "unbekannt"}` : " | nicht installiert oder nicht funktionsfähig");
   $("#btn-tool-install").hidden = st.ok;
   $("#btn-tool-update").hidden = !st.ok;
+  const upd = $("#btn-tool-update");
+  upd.textContent = st.version_state === "newer" ? "Zurück zur getesteten Version"
+    : st.version_state === "tested" ? "Tool prüfen" : "Tool aktualisieren";
+  upd.dataset.state = st.version_state || "unknown";
+  upd.dataset.tested = st.tested_commit || "";
+  $("#btn-tool-latest").hidden = !st.ok;
+  const vi = $("#tool-version");
+  vi.hidden = !st.tested_commit;
+  vi.innerHTML = st.tested_commit
+    ? `Installierter Commit: <b>${esc(st.installed_commit || "unbekannt")}</b> | Getesteter Commit: <b>${esc(st.tested_commit)}</b>` +
+      (st.tested_on ? ` (getestet am ${esc(st.tested_on)})` : "") +
+      ` | Zustand: <b class="ver-${esc(st.version_state)}">${esc(st.version_state_text)}</b>`
+    : "";
   if (!$("#year").options.length) {
     const cur = new Date().getFullYear();
     for (let y = cur; y >= 2020; y--) $("#year").add(new Option(y, y));
@@ -106,6 +119,7 @@ async function runJob(path, body) {
       $("#job-title").textContent = "- " + j.title;
       j.lines.forEach(log); since = j.next; status = j.status;
       if (status === "running") await new Promise((r) => setTimeout(r, 1000));
+      else (j.results || []).filter((x) => x.kind === "warning").forEach((x) => log("WARNUNG: " + x.message));
     }
   } catch (e) { log("FEHLER: " + e.message); }
   setBusy(false);
@@ -121,7 +135,20 @@ async function upload(fileList) {
 
 $("#btn-all").onclick = () => runJob("/api/workflow/all", { year: year() });
 $("#btn-tool-install").onclick = () => runJob("/api/tool/install", {});
-$("#btn-tool-update").onclick = () => runJob("/api/tool/update", {});
+$("#btn-tool-update").onclick = (e) => {
+  const d = e.currentTarget.dataset;
+  if (d.state === "newer") {
+    if (!confirm(`Das Tool wird auf die getestete Version ${d.tested} zurückgesetzt, eigene Dateien bleiben erhalten.`)) return;
+    runJob("/api/tool/update", { target: "tested", force: true });
+    return;
+  }
+  runJob("/api/tool/update", { target: "tested" });
+};
+$("#btn-tool-latest").onclick = () => {
+  if (!confirm("Neueste Version von main installieren (ungetestet)?\n\n" +
+    "Das kann die App unbrauchbar machen. Bei Problemen führt \"Zurück zur getesteten Version\" zurück auf die getestete Version.")) return;
+  runJob("/api/tool/update", { target: "latest" });
+};
 $("#btn-flex").onclick = () => runJob("/api/flex/fetch", { year: year() });
 $("#btn-generate").onclick = () => {
   const files = [...document.querySelectorAll(".sel:checked")].map((c) => c.value);

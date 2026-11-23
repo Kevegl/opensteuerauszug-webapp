@@ -25,7 +25,9 @@ from . import runner
 Log = Callable[[str], None]
 
 REPO_URL = "https://github.com/vroonhof/opensteuerauszug.git"
-ZIP_URL = "https://codeload.github.com/vroonhof/opensteuerauszug/zip/refs/heads/main"
+DEFAULT_SLUG = "vroonhof/opensteuerauszug"
+PIN_FILE = Path(__file__).with_name("tool_version.json")
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 MARKER_NAME = ".steuerauszug-assistent.json"
 MAX_ZIP_BYTES = 300 * 1024 * 1024
 MAX_UNPACKED_BYTES = 1024 * 1024 * 1024
@@ -76,19 +78,38 @@ class Deps:
     base_python: Callable[[], str] = default_base_python
     check_tool: Callable = runner.check_tool
     tmp_root: Path | None = None
-    zip_url: str = ZIP_URL
-    repo_url: str = REPO_URL
+    zip_url: str | None = None   # Override für Tests; sonst aus Pin bzw. main abgeleitet
+    repo_url: str | None = None  # Override für Tests; sonst aus dem Pin
+    pin: dict | None = None      # Override für Tests; sonst app/tool_version.json
     extra: dict = field(default_factory=dict)
 
 
 # --------------------------------------------------------------------------- Befehle (rein)
 
 def build_git_clone_cmd(target: str | Path, repo_url: str = REPO_URL) -> list[str]:
-    return ["git", "clone", "--depth", "1", repo_url, str(target)]
+    """Voller Clone (Fallback, wenn ein Fetch per SHA nicht geht)."""
+    return ["git", "clone", repo_url, str(target)]
 
 
-def build_git_pull_cmd() -> list[str]:
-    return ["git", "pull", "--ff-only"]
+def build_git_init_cmd() -> list[str]:
+    return ["git", "init"]
+
+
+def build_git_remote_add_cmd(repo_url: str) -> list[str]:
+    return ["git", "remote", "add", "origin", repo_url]
+
+
+def build_git_fetch_cmd(ref: str, shallow: bool = True) -> list[str]:
+    """fetch eines Commits (SHA) oder Branches; flach, solange nicht anders verlangt."""
+    return ["git", "fetch", *(["--depth", "1"] if shallow else []), "origin", ref]
+
+
+def build_git_fetch_all_cmd() -> list[str]:
+    return ["git", "fetch", "origin"]
+
+
+def build_git_checkout_detach_cmd(ref: str) -> list[str]:
+    return ["git", "checkout", "--detach", ref]
 
 
 def build_git_checkout_pyproject_cmd() -> list[str]:
@@ -101,6 +122,26 @@ def build_git_show_head_pyproject_cmd() -> list[str]:
 
 def build_git_head_cmd() -> list[str]:
     return ["git", "rev-parse", "--short", "HEAD"]
+
+
+def build_git_head_full_cmd() -> list[str]:
+    return ["git", "rev-parse", "HEAD"]
+
+
+def build_git_has_commit_cmd(commit: str) -> list[str]:
+    return ["git", "cat-file", "-e", f"{commit}^{{commit}}"]
+
+
+def build_git_is_ancestor_cmd(ancestor: str, descendant: str) -> list[str]:
+    return ["git", "merge-base", "--is-ancestor", ancestor, descendant]
+
+
+def build_git_is_shallow_cmd() -> list[str]:
+    return ["git", "rev-parse", "--is-shallow-repository"]
+
+
+def build_git_branch_cmd() -> list[str]:
+    return ["git", "branch", "--show-current"]
 
 
 def build_venv_cmd(base_python: str, repo: str | Path) -> list[str]:
@@ -184,7 +225,7 @@ def read_marker(repo: str | Path) -> dict:
 
 
 def write_marker(repo: str | Path, **extra) -> None:
-    data = {"kind": "zip", "source": ZIP_URL, "updated": time.strftime("%Y-%m-%dT%H:%M:%S"), **extra}
+    data = {"kind": "zip", "updated": time.strftime("%Y-%m-%dT%H:%M:%S"), **extra}
     (Path(repo) / MARKER_NAME).write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
@@ -223,7 +264,134 @@ def describe(repo: str | Path, source: str, deps: Deps | None = None) -> dict:
         "tool_source": source,  # settings | env | home | app
         "install_kind": detect_install_kind(repo),  # git | zip | unknown
         "version": installed_version(repo, deps),
+        **version_status(repo, deps),
     }
+
+
+# --------------------------------------------------------------------------- Pin (getestete Version)
+
+def load_pin(path: str | Path | None = None) -> dict:
+    """Liest app/tool_version.json (repo, commit, tested_on, note)."""
+    p = Path(path) if path else PIN_FILE
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise SetupError(f"Die Versionsdatei {p.name} ist nicht lesbar: {exc}") from exc
+    if not isinstance(data, dict) or not isinstance(data.get("repo"), str) or not data["repo"]:
+        raise SetupError(f"{p.name}: Eintrag 'repo' fehlt.")
+    commit = data.get("commit")
+    if not isinstance(commit, str) or not SHA_RE.match(commit):
+        raise SetupError(f"{p.name}: Eintrag 'commit' muss ein vollständiger SHA-1 (40 Hex-Zeichen) sein.")
+    return data
+
+
+def _pin(deps: Deps) -> dict:
+    return deps.pin if deps.pin is not None else load_pin()
+
+
+def _repo_url(deps: Deps, pin: dict) -> str:
+    return deps.repo_url or pin.get("repo") or REPO_URL
+
+
+def zip_url_for(deps: Deps, pin: dict, ref: str) -> str:
+    """ref: 'pinned' (Pin-Commit) oder 'latest' (main)."""
+    if deps.zip_url:
+        return deps.zip_url
+    m = re.match(r"^https://github\.com/([^/]+/[^/]+?)(?:\.git)?/?$", pin.get("repo", ""))
+    slug = m.group(1) if m else DEFAULT_SLUG
+    tail = "refs/heads/main" if ref == "latest" else pin["commit"]
+    return f"https://codeload.github.com/{slug}/zip/{tail}"
+
+
+def _short(commit: str | None) -> str | None:
+    return commit[:7] if commit else None
+
+
+def _same_commit(a: str | None, b: str | None) -> bool:
+    if not a or not b or min(len(a), len(b)) < 7:
+        return False
+    return a.startswith(b) or b.startswith(a)
+
+
+STATE_TEXT = {
+    "tested": "getestete Version",
+    "older": "älter als getestet – Aktualisieren empfohlen",
+    "older_diverged": "älter als getestet oder abweichend – Aktualisieren empfohlen",
+    "older_pinned_zip": "ältere getestete Version – Aktualisieren empfohlen",
+    "newer": "neuer als getestet (ungetestet)",
+    "unknown": "abweichend/unbekannt",
+}
+
+
+def git_head_full(deps: Deps, repo: Path) -> str | None:
+    code, out = deps.run_capture(build_git_head_full_cmd(), repo)
+    line = out.strip().splitlines()[0].strip() if code == 0 and out.strip() else ""
+    return line if re.fullmatch(r"[0-9a-f]{7,40}", line) else None
+
+
+def git_is_shallow(deps: Deps, repo: Path) -> bool:
+    code, out = deps.run_capture(build_git_is_shallow_cmd(), repo)
+    return code == 0 and out.strip().lower() == "true"
+
+
+def git_relation(deps: Deps, repo: Path, pin_commit: str) -> tuple[str, str | None]:
+    """Vergleicht HEAD mit dem Pin ohne Netzwerk. Gibt (tested|older|newer|unknown, HEAD) zurück.
+
+    Ist der Pin-Commit lokal vorhanden, entscheidet merge-base --is-ancestor (beide Richtungen).
+    Fehlt er lokal, kann HEAD ihn nicht enthalten: Bei einem vollständigen Repo gilt das als "älter"
+    (ein neuerer HEAD hätte den Pin in seiner Historie). Bei einem flachen Repo ist die Historie
+    abgeschnitten, dort lässt sich nichts sagen: "unknown".
+    """
+    head = git_head_full(deps, repo)
+    if not head:
+        return "unknown", None
+    if _same_commit(head, pin_commit):
+        return "tested", head
+    if deps.run_capture(build_git_has_commit_cmd(pin_commit), repo)[0] == 0:
+        if deps.run_capture(build_git_is_ancestor_cmd(pin_commit, head), repo)[0] == 0:
+            return "newer", head
+        if deps.run_capture(build_git_is_ancestor_cmd(head, pin_commit), repo)[0] == 0:
+            return "older", head
+        return "unknown", head  # abweichender Zweig
+    return ("unknown" if git_is_shallow(deps, repo) else "older"), head
+
+
+def _pin_is_local(deps: Deps, repo: Path, pin_commit: str) -> bool:
+    return deps.run_capture(build_git_has_commit_cmd(pin_commit), repo)[0] == 0
+
+
+def version_status(repo: str | Path, deps: Deps | None = None) -> dict:
+    """Installierter Commit, getesteter Commit und Zustand. Kein Netzwerk."""
+    deps = deps or Deps()
+    repo = Path(repo)
+    out = {"installed_commit": None, "installed_commit_full": None, "tested_commit": None,
+           "tested_commit_full": None, "tested_on": None, "version_state": "unknown",
+           "version_state_text": STATE_TEXT["unknown"]}
+    try:
+        pin = _pin(deps)
+    except SetupError:
+        return out
+    out.update(tested_commit=_short(pin["commit"]), tested_commit_full=pin["commit"], tested_on=pin.get("tested_on"))
+    state, head, text = "unknown", None, None
+    kind = detect_install_kind(repo) if repo.is_dir() else "unknown"
+    if kind == "git" and deps.which("git"):
+        state, head = git_relation(deps, repo, pin["commit"])
+        if state == "older" and not _pin_is_local(deps, repo, pin["commit"]):
+            text = STATE_TEXT["older_diverged"]  # offline nicht von divergierter Historie unterscheidbar
+    elif kind == "zip":
+        marker = read_marker(repo)
+        head = marker.get("commit") or None
+        if marker.get("ref") == "latest":
+            state = "newer"
+        elif head:
+            if _same_commit(head, pin["commit"]):
+                state = "tested"
+            elif marker.get("ref") == "pinned":
+                # Pins werden nur angehoben: ein anderer Pin-Commit stammt von einem früheren Pin.
+                state, text = "older", STATE_TEXT["older_pinned_zip"]
+    out.update(installed_commit=_short(head), installed_commit_full=head,
+               version_state=state, version_state_text=text or STATE_TEXT[state])
+    return out
 
 
 # --------------------------------------------------------------------------- ZIP
@@ -285,12 +453,12 @@ def safe_extract_zip(zip_path: Path, dest: Path, strip_top: bool = True) -> int:
     return count
 
 
-def fetch_zip_source(deps: Deps, tmp: Path, log: Log) -> Path:
+def fetch_zip_source(deps: Deps, tmp: Path, log: Log, url: str) -> Path:
     """Lädt das ZIP in tmp, entpackt nach tmp/src und gibt den Quellordner zurück."""
-    log(f"Lade ZIP: {deps.zip_url}")
+    log(f"Lade ZIP: {url}")
     zip_path = tmp / "source.zip"
     try:
-        deps.download(deps.zip_url, zip_path, log)
+        deps.download(url, zip_path, log)
     except SetupError:
         raise
     except Exception as exc:  # noqa: BLE001
@@ -446,11 +614,45 @@ def _repo_has_content(repo: Path) -> bool:
     return repo.is_dir() and any(repo.iterdir())
 
 
+def _rmtree_force(path: Path) -> None:
+    def onerr(func, p, _exc):
+        try:
+            os.chmod(p, stat.S_IWRITE)
+            func(p)
+        except OSError:
+            pass
+    shutil.rmtree(path, onerror=onerr)
+
+
+def _install_git(repo: Path, deps: Deps, log: Log, pin: dict) -> None:
+    """Holt genau den Pin-Commit in einen leeren Ordner."""
+    commit, url = pin["commit"], _repo_url(deps, pin)
+    repo.mkdir(parents=True, exist_ok=True)
+    try:
+        _step(deps, build_git_init_cmd(), repo, log, "git init")
+        _step(deps, build_git_remote_add_cmd(url), repo, log, "git remote add origin")
+        log(f"> git fetch --depth 1 origin {commit[:7]}")
+        if deps.run_streaming(build_git_fetch_cmd(commit), repo, log) == 0:
+            _step(deps, build_git_checkout_detach_cmd("FETCH_HEAD"), repo, log, "git checkout --detach FETCH_HEAD")
+        else:
+            log("Fetch per Commit-SHA nicht möglich, wechsle auf vollständigen Clone.")
+            _rmtree_force(repo / ".git")  # nur das eben angelegte, leere Repo
+            _step(deps, build_git_clone_cmd(repo, url), repo.parent, log, "git clone")
+            _step(deps, build_git_checkout_detach_cmd(commit), repo, log, f"git checkout --detach {commit[:7]}")
+    except SetupError:
+        if not (repo / "pyproject.toml").is_file() and (repo / ".git").exists():
+            _rmtree_force(repo / ".git")  # halbfertiges Repo entfernen, damit ein Neuversuch möglich bleibt
+        raise
+    log(f"Installiert: getestete Version {commit[:7]} (fester Commit, kein Branch).")
+
+
 def run_install(settings: dict, log: Log, deps: Deps | None = None) -> bool:
     deps = deps or Deps()
     repo = Path(settings["tool_repo"])
     try:
+        pin = _pin(deps)
         log(f"Installation nach {repo}")
+        log(f"Getestete Version: {pin['commit'][:7]} (getestet am {pin.get('tested_on', '?')})")
         if (repo / "pyproject.toml").is_file():
             log("Quellcode bereits vorhanden, überspringe Download (setze nur venv und Pakete auf).")
         elif _repo_has_content(repo):
@@ -459,16 +661,17 @@ def run_install(settings: dict, log: Log, deps: Deps | None = None) -> bool:
                 "Bitte einen leeren Ordner wählen oder den Ordner leeren.")
         elif deps.which("git"):
             repo.parent.mkdir(parents=True, exist_ok=True)
-            _step(deps, build_git_clone_cmd(repo, deps.repo_url), repo.parent, log, "git clone")
+            _install_git(repo, deps, log, pin)
         else:
             log("git nicht gefunden, nutze ZIP-Download.")
             repo.parent.mkdir(parents=True, exist_ok=True)
+            url = zip_url_for(deps, pin, "pinned")
             with _tmp(deps, repo.parent) as td:
-                src = fetch_zip_source(deps, Path(td), log)
+                src = fetch_zip_source(deps, Path(td), log, url)
                 if repo.exists():
                     repo.rmdir()  # nur leerer Ordner, sonst Fehler
                 shutil.move(str(src), str(repo))
-            write_marker(repo, source=deps.zip_url, files=_list_source_files(repo))
+            write_marker(repo, source=url, commit=pin["commit"], ref="pinned", files=_list_source_files(repo))
         apply_ibflex_fix(repo / "pyproject.toml", log)
         ensure_venv(deps, repo, log)
         pip_install(deps, repo, log)
@@ -478,64 +681,131 @@ def run_install(settings: dict, log: Log, deps: Deps | None = None) -> bool:
         return False
 
 
-def _update_git(repo: Path, deps: Deps, log: Log) -> None:
+def _warn_newer(log: Log, head: str | None, commit: str, outcome: dict | None = None) -> None:
+    if outcome is not None:
+        outcome["not_downgraded"] = f"Nicht zurückgestuft: installiert {_short(head)}, getestet {commit[:7]}."
+    log(f"WARNUNG: Der installierte Stand ({_short(head)}) ist neuer als die getestete Version ({commit[:7]}). "
+        "Es wird nicht zurückgestuft (nur mit force).")
+
+
+def _update_git(repo: Path, deps: Deps, log: Log, pin: dict, latest: bool, force: bool,
+                outcome: dict | None = None) -> bool:
+    """Bringt die Git-Installation auf den Pin (oder main). True, wenn der Quellcode gewechselt wurde.
+
+    Es gibt weder clean noch reset --hard: Untracked Dateien bleiben, ein Checkout, der lokale
+    Änderungen überschreiben würde, schlägt von selbst fehl.
+    """
     if not deps.which("git"):
         raise SetupError("git wurde nicht gefunden, die Git-Installation kann nicht aktualisiert werden.")
+    commit = pin["commit"]
+    if not latest:
+        rel, head = git_relation(deps, repo, commit)
+        if rel == "tested":
+            log(f"Das Tool ist bereits auf der getesteten Version ({commit[:7]}). Nichts zu tun.")
+            return False
+        if rel == "newer" and not force:
+            _warn_newer(log, head, commit, outcome)
+            return False
+        if rel == "newer":
+            log(f"Hinweis: force gesetzt, stufe von {_short(head)} auf die getestete Version {commit[:7]} zurück.")
     pyproject = repo / "pyproject.toml"
-    code, head = deps.run_capture(build_git_show_head_pyproject_cmd(), repo)
+    code, head_py = deps.run_capture(build_git_show_head_pyproject_cmd(), repo)
     if code != 0:
-        raise SetupError("Der Git-Stand von pyproject.toml ist nicht lesbar. Update abgebrochen: " + head.strip()[-200:])
+        raise SetupError("Der Git-Stand von pyproject.toml ist nicht lesbar. Update abgebrochen: " + head_py.strip()[-200:])
     try:
         with open(pyproject, "r", encoding="utf-8", newline="") as fh:
             working = fh.read()
     except OSError as exc:
         raise SetupError(f"pyproject.toml nicht lesbar: {exc}") from exc
-    state = classify_pyproject(working, head)
+    state = classify_pyproject(working, head_py)
     if state == "other":
         raise SetupError(
             "pyproject.toml enthält eigene Änderungen ausser dem ibflex-Fix. "
             "Update abgebrochen, damit nichts verloren geht. Bitte die Änderungen selbst sichern oder zurücksetzen.")
+
+    shallow = git_is_shallow(deps, repo)
+    ref = "main" if latest else commit
+    what = "main (neueste, ungetestete Version)" if latest else f"Commit {commit[:7]}"
+    log(f"> git fetch {'--depth 1 ' if shallow else ''}origin {ref if latest else commit[:7]}")
+    if deps.run_streaming(build_git_fetch_cmd(ref, shallow), repo, log) != 0:
+        if latest:
+            raise SetupError("git fetch origin main ist fehlgeschlagen. Das Tool wurde nicht verändert.")
+        log("Fetch per Commit-SHA nicht möglich, hole alle Branches.")
+        _step(deps, build_git_fetch_all_cmd(), repo, log, "git fetch origin")
+    if not latest:
+        rel, head = git_relation(deps, repo, commit)  # jetzt ist der Pin lokal vorhanden
+        if rel == "newer" and not force:
+            _warn_newer(log, head, commit, outcome)
+            return False
+    target = "FETCH_HEAD" if latest else commit
+
+    code, branch = deps.run_capture(build_git_branch_cmd(), repo)
+    branch = branch.strip().splitlines()[0] if code == 0 and branch.strip() else ""
     if state == "fix_only":
-        log("pyproject.toml enthält nur den ibflex-Fix, setze die Datei für das Update zurück.")
+        log("pyproject.toml enthält nur den ibflex-Fix, setze die Datei für den Wechsel zurück.")
         _step(deps, build_git_checkout_pyproject_cmd(), repo, log, "git checkout -- pyproject.toml")
     try:
-        _step(deps, build_git_pull_cmd(), repo, log, "git pull --ff-only")
+        _step(deps, build_git_checkout_detach_cmd(target), repo, log,
+              "git checkout --detach " + ("origin/main (FETCH_HEAD)" if latest else commit[:7]))
     except SetupError:
         apply_ibflex_fix(pyproject, log)  # Ausgangszustand wiederherstellen
         raise SetupError(
-            "git pull --ff-only ist fehlgeschlagen (lokale Commits oder Konflikte?). "
-            "Das Tool wurde nicht verändert.") from None
+            f"git checkout --detach ist fehlgeschlagen (lokale Änderungen oder Konflikte mit {what}?). "
+            "Eigene Dateien wurden nicht angefasst.") from None
+    log(f"Auf {what} gewechselt. Eigene (untracked) Dateien und lokale Branches blieben unverändert.")
+    if branch:
+        log(f"Hinweis: Das Tool steht jetzt auf einem festen Commit (detached HEAD), nicht mehr auf Branch '{branch}'. "
+            f'Zurück zum Branch: git -C "{repo}" checkout {branch}')
     apply_ibflex_fix(pyproject, log)
+    return True
 
 
-def _update_zip(repo: Path, deps: Deps, log: Log) -> None:
+def _update_zip(repo: Path, deps: Deps, log: Log, pin: dict, latest: bool) -> bool:
     if not (repo / "pyproject.toml").is_file():
         raise SetupError("Im Tool-Ordner fehlt pyproject.toml, Update abgebrochen.")
+    marker = read_marker(repo)
+    if not latest and marker.get("ref") != "latest" and _same_commit(marker.get("commit"), pin["commit"]):
+        log(f"Das Tool ist bereits auf der getesteten Version ({pin['commit'][:7]}). Nichts zu tun.")
+        return False
+    url = zip_url_for(deps, pin, "latest" if latest else "pinned")
     with _tmp(deps, repo.parent) as td:
-        src = fetch_zip_source(deps, Path(td), log)
+        src = fetch_zip_source(deps, Path(td), log, url)
         files = replace_zip_source(src, repo, log)
-    write_marker(repo, source=deps.zip_url, files=files)
+    write_marker(repo, source=url, files=files, commit=None if latest else pin["commit"],
+                 ref="latest" if latest else "pinned")
     apply_ibflex_fix(repo / "pyproject.toml", log)
+    return True
 
 
-def run_update(settings: dict, log: Log, deps: Deps | None = None) -> bool:
+def run_update(settings: dict, log: Log, deps: Deps | None = None, target: str = "pinned",
+               force: bool = False, outcome: dict | None = None) -> bool:
+    """target: 'pinned' (getestete Version) oder 'latest' (main, ungetestet).
+    outcome: optionales dict; bei unterlassenem Downgrade wird "not_downgraded" (Text) gesetzt."""
     deps = deps or Deps()
     repo = Path(settings["tool_repo"])
+    latest = target == "latest"
     try:
+        pin = _pin(deps)
         if not repo.is_dir() or not (repo / "pyproject.toml").is_file():
             raise SetupError("Kein installiertes Tool gefunden. Bitte zuerst installieren.")
         kind = detect_install_kind(repo)
         log(f"Aktualisiere {repo} (Installationsart: {kind})")
+        if latest:
+            log('ACHTUNG: Neueste Version von main (ungetestet). Bei Problemen führt "Zurück zur getesteten Version" '
+                "zurück auf die getestete Version.")
+        else:
+            log(f"Ziel: getestete Version {pin['commit'][:7]} (getestet am {pin.get('tested_on', '?')})")
         if kind == "git":
-            _update_git(repo, deps, log)
+            changed = _update_git(repo, deps, log, pin, latest, force, outcome)
         elif kind == "zip":
-            _update_zip(repo, deps, log)
+            changed = _update_zip(repo, deps, log, pin, latest)
         else:
             raise SetupError(
                 "Installationsart unbekannt (weder Git-Klon noch von dieser App per ZIP installiert). "
                 "Update abgebrochen, bitte von Hand aktualisieren.")
-        ensure_venv(deps, repo, log)
-        pip_install(deps, repo, log, upgrade_pip=False)
+        if changed:
+            ensure_venv(deps, repo, log)
+            pip_install(deps, repo, log, upgrade_pip=False)
         return finish_check(deps, repo, log)
     except (SetupError, OSError) as exc:
         log(f"FEHLER: {exc}")
@@ -548,7 +818,12 @@ def job_install(settings: dict, deps: Deps | None = None):
     return run
 
 
-def job_update(settings: dict, deps: Deps | None = None):
+def job_update(settings: dict, deps: Deps | None = None, target: str = "pinned", force: bool = False):
     def run(job):
-        return run_update(settings, job.log, deps)
+        outcome: dict = {}
+        ok = run_update(settings, job.log, deps, target=target, force=force, outcome=outcome)
+        if outcome.get("not_downgraded"):
+            job.results.append({"kind": "warning", "ok": True, "message": outcome["not_downgraded"]
+                                + " Zum Zurücksetzen \"Zurück zur getesteten Version\" verwenden."})
+        return ok
     return run

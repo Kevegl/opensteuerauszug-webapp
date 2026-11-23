@@ -62,9 +62,17 @@ def api_tool_install(body: dict = Body(default={})):
 
 
 @app.post("/api/tool/update")
-def api_tool_update():
+def api_tool_update(body: dict = Body(default={})):
+    """target: "tested" (Standard: auf die getestete Version) oder "latest" (main, ungetestet).
+    force: erlaubt das Zurückstufen, wenn der installierte Stand neuer als die getestete Version ist."""
     s = _settings()
-    return _start("tool-update", "Tool aktualisieren", toolsetup.job_update(s))
+    target = body.get("target") or "tested"
+    if target not in ("tested", "latest"):
+        raise HTTPException(400, 'Ungültiges Ziel: erlaubt sind "tested" und "latest".')
+    force = bool(body.get("force"))
+    if target == "latest":
+        return _start("tool-update", "Neueste Version (ungetestet)", toolsetup.job_update(s, target="latest", force=force))
+    return _start("tool-update", "Tool aktualisieren", toolsetup.job_update(s, force=force))
 
 
 @app.get("/api/settings")

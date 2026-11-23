@@ -30,6 +30,16 @@ Der Server bindet ausschliesslich an 127.0.0.1. Persönliche Daten (`settings.js
 
 Es läuft immer nur ein Job gleichzeitig.
 
+## Getestete Tool-Version
+
+Upstream (opensteuerauszug) hat keine Tags oder Releases. Die App installiert deshalb nicht den jeweils neuesten Stand von `main`, sondern genau den Commit, der in `app\tool_version.json` eingetragen und mit dieser App getestet ist (Felder `repo`, `commit`, `tested_on`, `note`).
+
+- **Installieren**: Git-Weg mit `git init`, `git fetch --depth 1 origin <commit>` und `git checkout --detach FETCH_HEAD` (Fallback: voller Clone und Checkout des Commits). Ohne git lädt die App das ZIP dieses Commits und merkt sich den Commit im Marker `.steuerauszug-assistent.json`.
+- **Tool aktualisieren** bringt das Tool auf diese getestete Version. Ein bestehender Klon (z.B. auf Branch `main`) bleibt dabei heil: untracked Dateien bleiben, es gibt kein `clean` und kein `reset --hard`. Der Klon steht danach auf einem festen Commit (detached HEAD); das Log nennt den Befehl zurück auf den Branch (z.B. `git checkout main`). Ist das Tool bereits auf der getesteten Version, passiert nichts; ist es neuer, warnt die App und stuft nicht zurück (nur per API mit `{"target": "tested", "force": true}`).
+- **Status**: Der Bereich "Tool" zeigt installierten und getesteten Commit sowie den Zustand (getestete Version / älter als getestet / neuer als getestet (ungetestet) / abweichend/unbekannt). Der Vergleich läuft lokal per `git merge-base --is-ancestor`, ohne Netzwerk. Fehlt der getestete Commit lokal in einem flachen Klon, lässt sich nichts sagen und es erscheint "abweichend/unbekannt".
+- **Neueste Version (ungetestet)**: Der unauffällige Button daneben (bzw. `POST /api/tool/update` mit `{"target": "latest"}`) holt `main`. Das kann die App unbrauchbar machen; "Tool aktualisieren" führt zurück auf die getestete Version.
+- **Pin anheben (Entwickler)**: Neuen Commit-SHA (40 Zeichen) und `tested_on` in `app\tool_version.json` eintragen, `.venv\Scripts\python.exe -m pytest -q` ausführen, einmal einen echten Lauf machen (frische Installation bzw. Update und Steuerauszug für ein Testjahr erzeugen) und danach die App neu veröffentlichen (Release).
+
 ## Entwicklung
 
 `.venv\Scripts\python.exe -m pytest tests`

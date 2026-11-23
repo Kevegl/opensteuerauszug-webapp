@@ -1,7 +1,9 @@
 """Tests für app/toolsetup.py und die Tool-Endpunkte. Offline: Fakes für Subprozesse, Netzwerk und which."""
 import json
+import os
 import shutil
 import stat
+import subprocess
 import threading
 import zipfile
 from pathlib import Path
@@ -396,8 +398,12 @@ def fake_streaming(calls, fail_substr=None, clone_pyproject=None, head_text=""):
             # Fake-Checkout setzt pyproject.toml auf den HEAD-Stand zurück.
             wr(Path(cwd) / "pyproject.toml", head_text)
         if cmd[:2] == ["git", "clone"]:
-            target = Path(cmd[-1])
-            wr(target / "pyproject.toml", clone_pyproject if clone_pyproject is not None else pyproject(OLD_LINE))
+            wr(Path(cmd[-1]) / ".git" / "HEAD", "x")
+        if cmd[:2] == ["git", "init"]:
+            wr(Path(cwd) / ".git" / "HEAD", "x")
+        if cmd[:3] == ["git", "checkout", "--detach"] and not (Path(cwd) / "pyproject.toml").exists():
+            # Fake-Checkout legt bei einer Neuinstallation pyproject.toml an.
+            wr(Path(cwd) / "pyproject.toml", clone_pyproject if clone_pyproject is not None else pyproject(OLD_LINE))
         if cmd[1:3] == ["-m", "venv"]:
             py = Path(cmd[-1]) / "Scripts" / "python.exe"
             py.parent.mkdir(parents=True, exist_ok=True)
@@ -416,8 +422,16 @@ def fake_zip_download(entries):
 BASE_PY = r"C:\Python\python.exe"
 
 
+PIN_SHA = "4633aab493e90a0f13e6701e8aa2d85cf77e4bab"
+OLD_SHA = "d3d3af7" + "0" * 33
+NEW_SHA = "ffffff1" + "0" * 33
+PIN = {"repo": "https://example.invalid/repo.git", "commit": PIN_SHA, "tested_on": "2026-11-23", "note": ""}
+
+
 def make_deps(tmp_path, calls, capture_calls, *, git=True, streaming_fail=None, head=None,
-              clone_pyproject=None, download=None):
+              clone_pyproject=None, download=None, head_sha=OLD_SHA, has_pin=True, ancestor=None,
+              shallow=False, branch="main", pin=None, zip_url="https://example.invalid/main.zip"):
+    """ancestor: None (keine Beziehung), "pin_in_head" (HEAD neuer) oder "head_in_pin" (HEAD älter)."""
     head_text = head if head is not None else pyproject(NEW_LINE)
 
     def capture(cmd, cwd, timeout=60):
@@ -425,6 +439,18 @@ def make_deps(tmp_path, calls, capture_calls, *, git=True, streaming_fail=None, 
         capture_calls.append(cmd)
         if cmd[:2] == ["git", "show"]:
             return 0, head_text
+        if cmd == ["git", "rev-parse", "HEAD"]:
+            return 0, head_sha + "\n"
+        if cmd[:3] == ["git", "cat-file", "-e"]:
+            return (0 if has_pin else 128), ""
+        if cmd[:3] == ["git", "merge-base", "--is-ancestor"]:
+            first = cmd[3]
+            ok = (ancestor == "pin_in_head" and first == PIN_SHA) or (ancestor == "head_in_pin" and first != PIN_SHA)
+            return (0 if ok else 1), ""
+        if cmd == ["git", "rev-parse", "--is-shallow-repository"]:
+            return 0, "true\n" if shallow else "false\n"
+        if cmd == ["git", "branch", "--show-current"]:
+            return 0, branch + "\n"
         return 0, "4633aab\n"
 
     return ts.Deps(
@@ -435,8 +461,9 @@ def make_deps(tmp_path, calls, capture_calls, *, git=True, streaming_fail=None, 
         base_python=lambda: BASE_PY,
         check_tool=lambda repo: {"ok": True, "message": "Bereit."},
         tmp_root=tmp_path / "tmproot",
-        zip_url="https://example.invalid/main.zip",
+        zip_url=zip_url,
         repo_url="https://example.invalid/repo.git",
+        pin=pin or dict(PIN),
     )
 
 
@@ -456,7 +483,10 @@ def test_install_git_command_order(tmp_path):
     assert ts.run_install({"tool_repo": str(repo)}, logs.append, deps) is True
     py = str(repo / ".venv" / "Scripts" / "python.exe")
     assert calls == [
-        ["git", "clone", "--depth", "1", "https://example.invalid/repo.git", str(repo)],
+        ["git", "init"],
+        ["git", "remote", "add", "origin", "https://example.invalid/repo.git"],
+        ["git", "fetch", "--depth", "1", "origin", PIN_SHA],
+        ["git", "checkout", "--detach", "FETCH_HEAD"],
         [BASE_PY, "-m", "venv", str(repo / ".venv")],
         [py, "-m", "pip", "install", "--upgrade", "pip"],
         [py, "-m", "pip", "install", "."],
@@ -537,32 +567,114 @@ def _make_installed(repo: Path, working: str, git: bool = True):
     py.write_bytes(b"")
 
 
-def test_update_git_fix_only_checks_out_pulls_and_refixes(tmp_path):
+def test_update_git_fix_only_fetches_checks_out_and_refixes(tmp_path):
     repo = tmp_path / "ost"
     _make_installed(repo, pyproject(NEW_LINE))  # Arbeitskopie nur mit Fix
     calls, cap = [], []
-    deps = make_deps(tmp_path, calls, cap, head=pyproject(OLD_LINE))
-    assert ts.run_update({"tool_repo": str(repo)}, lambda s: None, deps) is True
+    logs = []
+    deps = make_deps(tmp_path, calls, cap, head=pyproject(OLD_LINE), has_pin=False)
+    assert ts.run_update({"tool_repo": str(repo)}, logs.append, deps) is True
     py = str(repo / ".venv" / "Scripts" / "python.exe")
     assert calls == [
+        ["git", "fetch", "origin", PIN_SHA],
         ["git", "checkout", "--", "pyproject.toml"],
-        ["git", "pull", "--ff-only"],
+        ["git", "checkout", "--detach", PIN_SHA],
         [py, "-m", "pip", "install", "."],
     ]
-    assert cap == [["git", "show", "HEAD:pyproject.toml"]]
-    assert NEW_LINE in (repo / "pyproject.toml").read_text(encoding="utf-8")
+    assert ["git", "show", "HEAD:pyproject.toml"] in cap
     _no_destructive(calls + cap)
 
 
-def test_update_git_unchanged_pulls_without_checkout(tmp_path):
+def test_update_git_unchanged_fetches_without_pyproject_reset(tmp_path):
     repo = tmp_path / "ost"
     _make_installed(repo, pyproject(NEW_LINE))
     calls, cap = [], []
-    deps = make_deps(tmp_path, calls, cap, head=pyproject(NEW_LINE))
+    deps = make_deps(tmp_path, calls, cap, head=pyproject(NEW_LINE), has_pin=False)
     assert ts.run_update({"tool_repo": str(repo)}, lambda s: None, deps) is True
     assert ["git", "checkout", "--", "pyproject.toml"] not in calls
-    assert calls[0] == ["git", "pull", "--ff-only"]
+    assert calls[0] == ["git", "fetch", "origin", PIN_SHA]
+    assert calls[1] == ["git", "checkout", "--detach", PIN_SHA]
     _no_destructive(calls)
+
+
+def test_update_git_shallow_repo_fetches_depth_one(tmp_path):
+    repo = tmp_path / "ost"
+    _make_installed(repo, pyproject(NEW_LINE))
+    calls, cap = [], []
+    deps = make_deps(tmp_path, calls, cap, head=pyproject(NEW_LINE), has_pin=False, shallow=True)
+    assert ts.run_update({"tool_repo": str(repo)}, lambda s: None, deps) is True
+    assert calls[0] == ["git", "fetch", "--depth", "1", "origin", PIN_SHA]
+
+
+def test_update_git_logs_detached_head_and_way_back(tmp_path):
+    repo = tmp_path / "ost"
+    _make_installed(repo, pyproject(NEW_LINE))
+    calls, cap, logs = [], [], []
+    deps = make_deps(tmp_path, calls, cap, head=pyproject(NEW_LINE), has_pin=False, branch="main")
+    assert ts.run_update({"tool_repo": str(repo)}, logs.append, deps) is True
+    text = "\n".join(logs)
+    assert "detached HEAD" in text and "checkout main" in text
+
+
+def test_update_git_already_on_pin_only_checks_tool(tmp_path):
+    repo = tmp_path / "ost"
+    _make_installed(repo, pyproject(NEW_LINE))
+    calls, cap, logs = [], [], []
+    deps = make_deps(tmp_path, calls, cap, head_sha=PIN_SHA)
+    assert ts.run_update({"tool_repo": str(repo)}, logs.append, deps) is True
+    assert calls == []  # kein fetch, checkout oder pip
+    assert any("bereits auf der getesteten Version" in line for line in logs)
+
+
+def test_update_git_newer_than_pin_is_not_downgraded(tmp_path):
+    repo = tmp_path / "ost"
+    _make_installed(repo, pyproject(NEW_LINE))
+    calls, cap, logs = [], [], []
+    deps = make_deps(tmp_path, calls, cap, head_sha=NEW_SHA, ancestor="pin_in_head")
+    assert ts.run_update({"tool_repo": str(repo)}, logs.append, deps) is True
+    assert calls == []
+    assert any("neuer als die getestete Version" in line for line in logs)
+
+
+def test_job_update_newer_without_force_reports_warning_result(tmp_path):
+    repo = tmp_path / "ost"
+    _make_installed(repo, pyproject(NEW_LINE))
+    deps = make_deps(tmp_path, [], [], head_sha=NEW_SHA, ancestor="pin_in_head")
+    job = type("J", (), {"log": staticmethod(lambda s: None), "results": []})()
+    assert ts.job_update({"tool_repo": str(repo)}, deps)(job) is True
+    assert len(job.results) == 1 and job.results[0]["kind"] == "warning"
+    assert "Nicht zurückgestuft" in job.results[0]["message"]
+
+
+def test_job_update_newer_with_force_has_no_warning(tmp_path):
+    repo = tmp_path / "ost"
+    _make_installed(repo, pyproject(NEW_LINE))
+    deps = make_deps(tmp_path, [], [], head=pyproject(NEW_LINE), head_sha=NEW_SHA, ancestor="pin_in_head")
+    job = type("J", (), {"log": staticmethod(lambda s: None), "results": []})()
+    assert ts.job_update({"tool_repo": str(repo)}, deps, force=True)(job) is True
+    assert job.results == []
+
+
+def test_update_git_newer_than_pin_force_downgrades(tmp_path):
+    repo = tmp_path / "ost"
+    _make_installed(repo, pyproject(NEW_LINE))
+    calls, cap = [], []
+    deps = make_deps(tmp_path, calls, cap, head=pyproject(NEW_LINE), head_sha=NEW_SHA, ancestor="pin_in_head")
+    assert ts.run_update({"tool_repo": str(repo)}, lambda s: None, deps, force=True) is True
+    assert ["git", "checkout", "--detach", PIN_SHA] in calls
+
+
+def test_update_git_sha_fetch_failure_falls_back_to_fetch_origin(tmp_path):
+    repo = tmp_path / "ost"
+    _make_installed(repo, pyproject(NEW_LINE))
+    calls, cap = [], []
+    deps = make_deps(tmp_path, calls, cap, head=pyproject(NEW_LINE), has_pin=False)
+    inner = deps.run_streaming
+    deps.run_streaming = lambda cmd, cwd, log=lambda s: None, redact=(): (
+        1 if list(cmd) == ["git", "fetch", "origin", PIN_SHA] else inner(cmd, cwd, log))
+    assert ts.run_update({"tool_repo": str(repo)}, lambda s: None, deps) is True
+    assert ["git", "fetch", "origin"] in calls
+    assert ["git", "checkout", "--detach", PIN_SHA] in calls
 
 
 def test_update_git_aborts_on_foreign_pyproject_changes(tmp_path):
@@ -573,21 +685,41 @@ def test_update_git_aborts_on_foreign_pyproject_changes(tmp_path):
     logs = []
     deps = make_deps(tmp_path, calls, cap, head=pyproject(OLD_LINE))
     assert ts.run_update({"tool_repo": str(repo)}, logs.append, deps) is False
-    assert calls == []  # weder checkout noch pull
+    assert calls == []  # weder fetch noch checkout
     assert (repo / "pyproject.toml").read_text(encoding="utf-8") == working
     assert any("eigene Änderungen" in line for line in logs)
 
 
-def test_update_git_pull_failure_restores_fix(tmp_path):
+def test_update_git_fetch_failure_leaves_everything_untouched(tmp_path):
+    repo = tmp_path / "ost"
+    _make_installed(repo, pyproject(NEW_LINE))
+    calls, cap, logs = [], [], []
+    deps = make_deps(tmp_path, calls, cap, head=pyproject(OLD_LINE), streaming_fail="fetch", has_pin=False)
+    assert ts.run_update({"tool_repo": str(repo)}, logs.append, deps) is False
+    assert ["git", "checkout", "--", "pyproject.toml"] not in calls
+    assert NEW_LINE in (repo / "pyproject.toml").read_text(encoding="utf-8")
+
+
+def test_update_git_checkout_failure_restores_fix(tmp_path):
     repo = tmp_path / "ost"
     _make_installed(repo, pyproject(NEW_LINE))
     calls, cap = [], []
     logs = []
-    deps = make_deps(tmp_path, calls, cap, head=pyproject(OLD_LINE), streaming_fail="pull")
+    deps = make_deps(tmp_path, calls, cap, head=pyproject(OLD_LINE), streaming_fail="--detach", has_pin=False)
     assert ts.run_update({"tool_repo": str(repo)}, logs.append, deps) is False
-    assert calls[:2] == [["git", "checkout", "--", "pyproject.toml"], ["git", "pull", "--ff-only"]]
+    assert calls[:3] == [["git", "fetch", "origin", PIN_SHA], ["git", "checkout", "--", "pyproject.toml"],
+                         ["git", "checkout", "--detach", PIN_SHA]]
     assert NEW_LINE in (repo / "pyproject.toml").read_text(encoding="utf-8")
-    assert any("nicht verändert" in line for line in logs)
+    _no_destructive(calls)
+
+
+def test_update_git_latest_fetches_main_and_detaches(tmp_path):
+    repo = tmp_path / "ost"
+    _make_installed(repo, pyproject(NEW_LINE))
+    calls, cap = [], []
+    deps = make_deps(tmp_path, calls, cap, head=pyproject(NEW_LINE), head_sha=PIN_SHA)
+    assert ts.run_update({"tool_repo": str(repo)}, lambda s: None, deps, target="latest") is True
+    assert calls[:2] == [["git", "fetch", "origin", "main"], ["git", "checkout", "--detach", "FETCH_HEAD"]]
     _no_destructive(calls)
 
 
@@ -611,7 +743,8 @@ def test_update_zip_keeps_user_files_and_updates_source(tmp_path):
     assert (repo / "data" / "security_identifiers.csv").read_text() == "USER-IDS"
     assert (repo / "notes.txt").read_text() == "meine Notizen"
     assert (repo / "src" / "opensteuerauszug" / "__init__.py").read_text() == "neu"
-    assert ts.read_marker(repo)["kind"] == "zip"
+    marker = ts.read_marker(repo)
+    assert marker["kind"] == "zip" and marker["commit"] == PIN_SHA
     py = str(repo / ".venv" / "Scripts" / "python.exe")
     assert calls == [[py, "-m", "pip", "install", "."]]
     assert cap == []
@@ -682,7 +815,7 @@ def test_install_409_when_tool_works(api, monkeypatch):
 def test_install_starts_when_tool_not_working(api, monkeypatch):
     client, _ = api
     _ok_tool(monkeypatch, False)
-    monkeypatch.setattr(ts, "job_install", lambda s, deps=None: (lambda job: True))
+    monkeypatch.setattr(ts, "job_install", lambda s, deps=None, **kw: (lambda job: True))
     r = client.post("/api/tool/install", json={})
     assert r.status_code == 200 and "job_id" in r.json()
 
@@ -690,14 +823,14 @@ def test_install_starts_when_tool_not_working(api, monkeypatch):
 def test_install_force_starts_even_when_tool_works(api, monkeypatch):
     client, _ = api
     _ok_tool(monkeypatch, True)
-    monkeypatch.setattr(ts, "job_install", lambda s, deps=None: (lambda job: True))
+    monkeypatch.setattr(ts, "job_install", lambda s, deps=None, **kw: (lambda job: True))
     r = client.post("/api/tool/install", json={"force": True})
     assert r.status_code == 200
 
 
 def test_update_starts_job(api, monkeypatch):
     client, _ = api
-    monkeypatch.setattr(ts, "job_update", lambda s, deps=None: (lambda job: True))
+    monkeypatch.setattr(ts, "job_update", lambda s, deps=None, **kw: (lambda job: True))
     r = client.post("/api/tool/update")
     assert r.status_code == 200 and "job_id" in r.json()
 
@@ -706,7 +839,7 @@ def test_update_409_while_other_job_runs(api, monkeypatch):
     client, _ = api
     release = threading.Event()
     main.jobs.start("kursliste", "blockiert", lambda job: release.wait(5) and True)
-    monkeypatch.setattr(ts, "job_update", lambda s, deps=None: (lambda job: True))
+    monkeypatch.setattr(ts, "job_update", lambda s, deps=None, **kw: (lambda job: True))
     try:
         r = client.post("/api/tool/update")
         assert r.status_code == 409
@@ -740,3 +873,184 @@ def test_update_settings_empty_tool_repo_resets_to_auto(clean_env, tmp_path):
     assert json.loads(sf.read_text(encoding="utf-8"))["tool_repo"] == ""
     # Ohne tool_repo im Patch bleibt ein gesetzter Pfad unverändert.
     assert st.update_settings(current, {})["tool_repo"] == str(tmp_path / "mein")
+
+
+# --------------------------------------------------------------------------- version_status (echte Git-Repos)
+
+GIT_ENV = {"GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "test@example.invalid",
+           "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "test@example.invalid"}
+
+
+def _git(cwd, *args):
+    cmd = ["git", "-c", "commit.gpgsign=false", *args]
+    return subprocess.run(cmd, cwd=str(cwd), check=True, capture_output=True, text=True,
+                          env={**os.environ, **GIT_ENV}).stdout.strip()
+
+
+def _three_commit_repo(path: Path) -> list[str]:
+    """Echtes Repo mit 3 Commits auf main. Rückgabe: [c1, c2, c3] als volle SHAs."""
+    path.mkdir(parents=True)
+    _git(path, "init", "-q", "-b", "main")
+    shas = []
+    for i in range(1, 4):
+        (path / "f.txt").write_text(f"stand {i}\n", encoding="utf-8")
+        _git(path, "add", "f.txt")
+        _git(path, "commit", "-q", "-m", f"c{i}")
+        shas.append(_git(path, "rev-parse", "HEAD"))
+    return shas
+
+
+def _status_against(repo: Path, pin_sha: str) -> dict:
+    pin = {"repo": "https://example.invalid/repo.git", "commit": pin_sha, "tested_on": "2026-11-23", "note": ""}
+    return ts.version_status(repo, ts.Deps(pin=pin))  # which/run_capture bleiben echt
+
+
+def test_version_status_git_tested(tmp_path):
+    c = _three_commit_repo(tmp_path / "repo")
+    info = _status_against(tmp_path / "repo", c[2])
+    assert info["version_state"] == "tested"
+    assert info["version_state_text"] == ts.STATE_TEXT["tested"]
+    assert info["installed_commit_full"] == c[2] and info["installed_commit"] == c[2][:7]
+    assert info["tested_commit_full"] == c[2] and info["tested_commit"] == c[2][:7]
+
+
+def test_version_status_git_older(tmp_path):
+    repo = tmp_path / "repo"
+    c = _three_commit_repo(repo)
+    _git(repo, "checkout", "-q", "--detach", c[0])
+    info = _status_against(repo, c[2])
+    assert info["version_state"] == "older"
+    assert info["installed_commit_full"] == c[0]
+
+
+def test_version_status_git_newer(tmp_path):
+    repo = tmp_path / "repo"
+    c = _three_commit_repo(repo)
+    info = _status_against(repo, c[0])  # HEAD = c3, Pin = c1
+    assert info["version_state"] == "newer"
+    assert info["version_state_text"] == ts.STATE_TEXT["newer"]
+
+
+def test_version_status_git_unknown_on_diverged_branch(tmp_path):
+    repo = tmp_path / "repo"
+    c = _three_commit_repo(repo)
+    _git(repo, "checkout", "-q", "-b", "side", c[0])
+    (repo / "f.txt").write_text("abweichend\n", encoding="utf-8")
+    _git(repo, "commit", "-q", "-am", "abweichend")
+    info = _status_against(repo, c[2])  # Pin liegt lokal, aber weder Vorfahr noch Nachfahr
+    assert info["version_state"] == "unknown"
+
+
+def test_version_status_shallow_clone(tmp_path):
+    c = _three_commit_repo(tmp_path / "src")
+    shallow = tmp_path / "shallow"
+    _git(tmp_path, "clone", "-q", "--depth", "1", (tmp_path / "src").as_uri(), str(shallow))
+    assert _status_against(shallow, c[2])["version_state"] == "tested"
+    # Pin-Commit fehlt im flachen Repo: Historie ist abgeschnitten, also "unknown", nicht "older".
+    assert _status_against(shallow, c[0])["version_state"] == "unknown"
+
+
+def test_version_status_zip_marker(tmp_path):
+    c = _three_commit_repo(tmp_path / "hist")
+    zdir = tmp_path / "zip"
+    zdir.mkdir()
+    (zdir / "pyproject.toml").write_text('[project]\nversion = "0.1.0"\n', encoding="utf-8")
+    ts.write_marker(zdir, commit=c[2], ref="pinned")
+    info = _status_against(zdir, c[2])
+    assert info["version_state"] == "tested"
+    assert info["installed_commit"] == c[2][:7]
+    ts.write_marker(zdir, commit=c[0], ref="pinned")  # früherer Pin (Pins werden nur angehoben)
+    info = _status_against(zdir, c[2])
+    assert info["version_state"] == "older"
+    assert info["version_state_text"] == "ältere getestete Version – Aktualisieren empfohlen"
+    ts.write_marker(zdir, commit=c[0])  # ohne ref: unknown
+    assert _status_against(zdir, c[2])["version_state"] == "unknown"
+    ts.write_marker(zdir, commit=None, ref="pinned")  # ohne Commit: unknown
+    assert _status_against(zdir, c[2])["version_state"] == "unknown"
+    ts.write_marker(zdir, commit=None, ref="latest")  # main-ZIP
+    assert _status_against(zdir, c[2])["version_state"] == "newer"
+
+
+def test_version_status_unknown_install_kind(tmp_path):
+    c = _three_commit_repo(tmp_path / "hist")
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    (bare / "pyproject.toml").write_text("x", encoding="utf-8")
+    info = _status_against(bare, c[2])
+    assert info["version_state"] == "unknown" and info["installed_commit"] is None
+
+
+def test_version_status_full_repo_missing_pin_on_diverged_branch(tmp_path):
+    # Dokumentiertes Verhalten: offline nicht von "alt" unterscheidbar, daher "older" mit eigenem Text.
+    repo = tmp_path / "repo"
+    c = _three_commit_repo(repo)
+    _git(repo, "checkout", "-q", "-b", "side", c[0])
+    (repo / "f.txt").write_text("abweichend\n", encoding="utf-8")
+    _git(repo, "commit", "-q", "-am", "abweichend")
+    missing = "ab" * 20
+    info = _status_against(repo, missing)
+    assert info["version_state"] == "older"
+    assert info["version_state_text"] == "älter als getestet oder abweichend – Aktualisieren empfohlen"
+
+
+# --------------------------------------------------------------------------- API: update und status
+
+def _capture_job_update(monkeypatch):
+    seen = {}
+
+    def fake(s, deps=None, **kw):
+        seen.update(kw)
+        return lambda job: True
+    monkeypatch.setattr(ts, "job_update", fake)
+    return seen
+
+
+def test_update_without_body_targets_tested(api, monkeypatch):
+    client, _ = api
+    seen = _capture_job_update(monkeypatch)
+    r = client.post("/api/tool/update")
+    assert r.status_code == 200 and "job_id" in r.json()
+    assert seen.get("target", "pinned") != "latest"
+    assert seen.get("force", False) is False
+
+
+def test_update_explicit_tested_and_force_passed(api, monkeypatch):
+    client, _ = api
+    seen = _capture_job_update(monkeypatch)
+    r = client.post("/api/tool/update", json={"target": "tested", "force": True})
+    assert r.status_code == 200
+    assert seen.get("target", "pinned") != "latest" and seen["force"] is True
+
+
+def test_update_latest_is_allowed(api, monkeypatch):
+    client, _ = api
+    seen = _capture_job_update(monkeypatch)
+    r = client.post("/api/tool/update", json={"target": "latest"})
+    assert r.status_code == 200 and "job_id" in r.json()
+    assert seen["target"] == "latest"
+
+
+@pytest.mark.parametrize("body", [{"target": "main"}, {"target": "pinned"}, {"target": 1}])
+def test_update_invalid_target_is_400(api, monkeypatch, body):
+    client, _ = api
+    seen = _capture_job_update(monkeypatch)
+    r = client.post("/api/tool/update", json=body)
+    assert r.status_code == 400
+    assert seen == {} and main.jobs.running() is None
+
+
+def test_status_has_version_fields_from_pin(api, monkeypatch, tmp_path):
+    client, repo = api
+    _ok_tool(monkeypatch, False)
+    pinfile = tmp_path / "tool_version.json"
+    pinfile.write_text(json.dumps({"repo": "https://example.invalid/repo.git", "commit": PIN_SHA,
+                                   "tested_on": "2026-11-23"}), encoding="utf-8")
+    monkeypatch.setattr(ts, "PIN_FILE", pinfile)
+    ts.write_marker(repo, commit=PIN_SHA, ref="pinned")
+    wr(repo / "pyproject.toml", pyproject(NEW_LINE))
+    body = client.get("/api/status").json()
+    for key in ("installed_commit", "tested_commit", "version_state", "version_state_text"):
+        assert key in body
+    assert body["installed_commit"] == PIN_SHA[:7] and body["tested_commit"] == PIN_SHA[:7]
+    assert body["version_state"] == "tested"
+    assert body["version_state_text"] == ts.STATE_TEXT["tested"]

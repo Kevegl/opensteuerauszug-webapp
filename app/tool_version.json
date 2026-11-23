@@ -1,0 +1,6 @@
+{
+  "repo": "https://github.com/vroonhof/opensteuerauszug.git",
+  "commit": "4633aab493e90a0f13e6701e8aa2d85cf77e4bab",
+  "tested_on": "2026-11-23",
+  "note": "Getestete Version von opensteuerauszug (Upstream hat keine Tags oder Releases, daher Pin auf einen Commit)."
+}

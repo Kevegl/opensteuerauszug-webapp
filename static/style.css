@@ -40,3 +40,5 @@ button.small { padding: 3px 9px; font-size: 13px; }
 pre#log { background: var(--log-bg); color: var(--log-fg); padding: 12px; border-radius: 8px; max-height: 360px; overflow: auto; margin: 0; font: 12.5px/1.4 Consolas, monospace; white-space: pre-wrap; }
 .hist-year { font-weight: 600; margin-top: 8px; }
 .hist-files a { display: inline-block; margin-right: 14px; color: var(--accent); }
+button.subtle { background: transparent; color: var(--muted); border-style: dashed; }
+.ver-tested { color: var(--ok); } .ver-older { color: var(--warn); } .ver-newer, .ver-unknown { color: var(--muted); }
