@@ -46,6 +46,7 @@ def api_status():
     s = _settings()
     info = runner.check_tool(s["tool_repo"])
     info.update(toolsetup.describe(s["tool_repo"], s.get("tool_repo_source", "settings")))
+    info["app"] = "steuerauszug-assistent"
     info["default_year"] = dt.date.today().year - 1
     running = jobs.running()
     info["running_job"] = running.id if running else None
