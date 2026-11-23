@@ -1,0 +1,14 @@
+.venv/
+work/
+output/
+settings.json
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# ACHTUNG: Echte Flex-XML-Dateien (und andere persoenliche Daten) duerfen NIE eingecheckt werden.
+*.pdf
+*.sqlite
+.env
+*.bak
+*.tmp

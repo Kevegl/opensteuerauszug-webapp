@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Steuerauszug-Assistent</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>Steuerauszug-Assistent</h1>
+  <div id="status" class="badge">Prüfe ...</div>
+</header>
+<main>
+  <section class="card" id="sec-year">
+    <h2>Steuerjahr</h2>
+    <div class="row">
+      <select id="year"></select>
+      <button id="btn-all" class="primary">Alles automatisch</button>
+    </div>
+    <p class="hint">Kursliste prüfen/laden, Flex-Daten aller gespeicherten Queries holen, Steuerauszüge erzeugen.</p>
+  </section>
+
+  <section class="card">
+    <h2>Kurslisten</h2>
+    <p class="hint" id="kl-dir"></p>
+    <table id="kl-table"><thead><tr><th>Jahr</th><th>Status</th><th>Größe</th><th>Datum</th><th></th></tr></thead><tbody></tbody></table>
+  </section>
+
+  <section class="card">
+    <h2>IBKR-Daten</h2>
+    <div id="drop" class="drop" tabindex="0">XML-Dateien hierher ziehen oder <label class="link">auswählen<input id="file-input" type="file" accept=".xml" multiple hidden></label></div>
+    <table id="files-table"><thead><tr><th></th><th>Datei</th><th>Konto</th><th>Größe</th><th></th></tr></thead><tbody></tbody></table>
+    <p class="hint" id="files-empty" hidden>Noch keine Dateien.</p>
+    <div class="row"><button id="btn-generate" class="primary">Steuerauszug erzeugen</button>
+      <button id="btn-flex">Per Flex Web Service abrufen</button></div>
+  </section>
+
+  <section class="card">
+    <h2>Flex Web Service</h2>
+    <label>Token <input id="flex-token" type="password" autocomplete="off" placeholder="nicht gesetzt"></label>
+    <p class="hint">Gespeichert: <span id="token-masked">-</span> <button id="btn-clear-token" class="small">Token löschen</button></p>
+    <table id="q-table"><thead><tr><th>Bezeichnung</th><th>Query-ID</th><th></th></tr></thead><tbody></tbody></table>
+    <div class="row"><button id="btn-add-q" class="small">+ Query</button><button id="btn-save-settings">Speichern</button></div>
+    <label>Tool-Ordner <input id="tool-repo" type="text"></label>
+  </section>
+
+  <section class="card">
+    <h2>Verlauf</h2>
+    <div id="history"></div>
+  </section>
+
+  <section class="card">
+    <h2>Log <span id="job-title" class="hint"></span></h2>
+    <pre id="log">Bereit.</pre>
+  </section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
