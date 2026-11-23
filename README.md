@@ -1,51 +1,53 @@
 # Steuerauszug-Assistent
 
-Lokale Weboberfläche (Deutsch), die das Tool [opensteuerauszug](https://github.com/vroonhof/opensteuerauszug) automatisiert: Kursliste laden, IBKR-Flex-Daten holen oder hochladen, Schweizer Steuerauszug (PDF + XML) erzeugen. Das Tool selbst wird nur per Subprozess mit seinem eigenen venv aufgerufen und nie verändert.
+**English** | [Deutsch](README.de.md)
 
-> **Haftungsausschluss:** Dieses Projekt ist ein privates Hilfswerkzeug und steht in keiner Verbindung zur Eidgenössischen Steuerverwaltung (ESTV), zu Interactive Brokers oder zu den Autoren von opensteuerauszug. Es ist keine Steuerberatung. Die Nutzung erfolgt ohne Gewähr und auf eigene Verantwortung: Die erzeugten Steuerauszüge können fehlerhaft oder unvollständig sein. Prüfe sie vor der Einreichung immer selbst, insbesondere gegen dein IBKR Activity Statement und bei Kapitalmassnahmen. Massgeblich sind allein deine eigenen Angaben gegenüber der Steuerbehörde.
+A local web UI (German only) that automates the [opensteuerauszug](https://github.com/vroonhof/opensteuerauszug) tool: download the Kursliste (ESTV price list), fetch or upload IBKR Flex data, and generate a Swiss tax statement (Steuerauszug) as PDF + XML. The tool itself is only called as a subprocess using its own venv and is never modified.
 
-## Einrichtung
+> **Disclaimer:** This project is a private helper tool and is not affiliated with the Swiss Federal Tax Administration (ESTV), Interactive Brokers, or the authors of opensteuerauszug. It is not tax advice. It is provided without warranty and used at your own risk: the generated tax statements (Steuerauszüge) may be incorrect or incomplete. Always check them yourself before filing, in particular against your IBKR Activity Statement and for corporate actions. Only your own declarations to the tax authority are authoritative.
 
-1. Voraussetzung: Python ab 3.11 (und optional git; ohne git lädt die App das Tool als ZIP). Das Tool [opensteuerauszug](https://github.com/vroonhof/opensteuerauszug) installiert die App auf Knopfdruck: Im Bereich "Tool" erscheint bei fehlendem Tool "Tool installieren", sonst "Tool aktualisieren". Eine bestehende Installation unter `%USERPROFILE%\opensteuerauszug` (mit `.venv`) wird automatisch genutzt; sonst installiert die App nach `tool\opensteuerauszug` im Projektordner. Ein eigener Pfad ist in der Oberfläche (Feld Tool-Ordner) oder in `settings.json` setzbar, alternativ per Umgebungsvariable `OPENSTEUER_TOOL_REPO`. Der bekannte ibflex-Fix (`ibflex` durch `ibflex2` in dessen `pyproject.toml`) wird bei Installation und Update automatisch erledigt, sofern Upstream ihn nicht schon enthält: Upstream hat den `ibflex2`-Eintrag inzwischen selbst, der automatische Fix greift nur noch bei älteren Ständen. Eine bestehende ältere Installation lässt sich in der App über "Tool aktualisieren" auf den neuesten Stand bringen. Ein lokal angewendeter ibflex-Fix wird dabei automatisch zurückgesetzt, untracked Dateien bleiben unberührt. Beim Update werden `config.toml`, `data\security_identifiers.csv` und eigene Dateien nie gelöscht (bei ZIP-Installationen entfallen nur *.py unter `src\`, die Upstream entfernt hat; bei einem Fehler wird der Ausgangszustand wiederhergestellt).
-2. Doppelklick auf `start.bat`. Das Skript sucht Python ab 3.11 (`py`-Launcher, dann `python`/`python3` im PATH; der Microsoft-Store-Platzhalter wird übersprungen). Findet es keines, bietet es nach Rückfrage (J/N) die automatische Installation von Python 3.12 per winget an (Benutzerinstallation, keine Adminrechte nötig). Ohne winget oder bei "N" erscheint ein Hinweis auf https://www.python.org/downloads/ (Version 3.12, Haken "Add python.exe to PATH" bzw. py-Launcher). Ein vorhandenes `.venv` mit Python unter 3.11 oder ein defektes `.venv` wird gemeldet und nach Rückfrage neu angelegt. Danach installiert das Skript `requirements.txt` (bei einem Fehler, z.B. ohne Internet, wird der Server nicht gestartet), startet den Server auf `http://127.0.0.1:8765` und öffnet den Browser. Mit `powershell -File start.ps1 -DryRun` wird nur angezeigt, was passieren würde.
+## Setup
 
-Der Server bindet ausschliesslich an 127.0.0.1. Persönliche Daten (`settings.json`, `work\`, `output\`) sind per `.gitignore` ausgeschlossen. Der Flex-Token liegt im Klartext in `settings.json`, wird aber nie geloggt und in der UI nur maskiert angezeigt.
+1. Prerequisite: Python 3.11 or newer (and optionally git; without git the app downloads the tool as a ZIP). The app installs the [opensteuerauszug](https://github.com/vroonhof/opensteuerauszug) tool at the press of a button: in the "Tool" section, "Tool installieren" (Install tool) appears if the tool is missing, otherwise "Tool aktualisieren" (Update tool). An existing installation under `%USERPROFILE%\opensteuerauszug` (with `.venv`) is used automatically; otherwise the app installs into `tool\opensteuerauszug` in the project folder. A custom path can be set in the UI (field "Tool-Ordner", tool folder) or in `settings.json`, or alternatively via the environment variable `OPENSTEUER_TOOL_REPO`. The known ibflex fix (replacing `ibflex` with `ibflex2` in its `pyproject.toml`) is applied automatically on install and update, unless upstream already includes it: upstream now has the `ibflex2` entry itself, so the automatic fix only applies to older revisions. An older existing installation can be brought up to date in the app via "Tool aktualisieren". A locally applied ibflex fix is reset automatically in the process; untracked files are left untouched. On update, `config.toml`, `data\security_identifiers.csv` and your own files are never deleted (for ZIP installations, only *.py files under `src\` that upstream has removed are dropped; on error, the original state is restored).
+2. Double-click `start.bat`. The script looks for Python 3.11 or newer (the `py` launcher, then `python`/`python3` on the PATH; the Microsoft Store placeholder is skipped). If it finds none, it offers, after a prompt (J/N, i.e. Y/N), to install Python 3.12 automatically via winget (per-user install, no admin rights needed). Without winget, or if you answer "N", a note points to https://www.python.org/downloads/ (version 3.12, tick "Add python.exe to PATH" or the py launcher). An existing `.venv` with Python below 3.11, or a broken `.venv`, is reported and recreated after a prompt. The script then installs `requirements.txt` (on failure, e.g. without internet, the server is not started), starts the server at `http://127.0.0.1:8765` and opens the browser. `powershell -File start.ps1 -DryRun` only shows what would happen.
 
-## Flex-Query bei IBKR einmalig einrichten
+The server binds to 127.0.0.1 only. Personal data (`settings.json`, `work\`, `output\`) is excluded via `.gitignore`. The Flex token is stored in plain text in `settings.json`, but is never logged and is only shown masked in the UI.
 
-1. Client Portal: Performance & Reports > Flex Queries > Activity Flex Query > neu erstellen.
-2. Sections aktivieren (jeweils alle Felder auswählen): Account Information, Trades, Open Positions, Transfers, Corporate Actions, Cash Transactions, Cash Report, Securities Info.
-3. Format: XML. Zeitraum: beliebig (wird beim automatischen Abruf durch das Steuerjahr 01.01. bis 31.12. überschrieben).
-4. Speichern und die Query-ID notieren (eine Query pro Konto möglich).
-5. Flex Web Service aktivieren: Flex Queries > Flex Web Service Configuration > aktivieren, Token erzeugen (Gültigkeit beachten) und kopieren.
+## Setting up the Flex query at IBKR (one time)
 
-## Bedienung
+1. Client Portal: Performance & Reports > Flex Queries > Activity Flex Query > create new.
+2. Enable these sections (select all fields in each): Account Information, Trades, Open Positions, Transfers, Corporate Actions, Cash Transactions, Cash Report, Securities Info.
+3. Format: XML. Period: any (it is overridden by the tax year, 01.01. to 31.12., during the automatic fetch).
+4. Save and note the query ID (one query per account is possible).
+5. Enable the Flex Web Service: Flex Queries > Flex Web Service Configuration > enable, generate a token (note its validity period) and copy it.
 
-- **Status**: Das Badge oben zeigt, ob das Tool-venv gefunden wird und `opensteuerauszug` importierbar ist. Der Bereich "Tool" zeigt Ordner, Herkunft, Installationsart und Stand und bietet Installieren bzw. Aktualisieren.
-- **Kurslisten**: Tabelle der Jahre ab 2020 mit Status (nicht vorhanden / XML / XML + SQLite). "Herunterladen/Aktualisieren" startet einen Hintergrundjob mit Live-Log. Scheitert die SQLite-Konvertierung (bekannter Fehler `UNIQUE constraint failed: signs.kl_id`, z.B. 2025), wird die halbfertige `.sqlite` gelöscht und das Jahr als "XML" behandelt.
-- **IBKR-Daten**: Flex-XML per Drag&Drop hochladen oder per Flex Web Service abrufen (Token und Query-IDs unter "Flex Web Service" speichern).
-- **Steuerauszug erzeugen**: Jahr wählen (Standard Vorjahr), Dateien ankreuzen, "Steuerauszug erzeugen". Fehlt die Kursliste, wird sie zuerst geladen. Ergebnisse: `output\<Jahr>\Steuerauszug_<Konto>_<Jahr>.pdf/.xml`.
-- **Alles automatisch**: Kursliste prüfen/laden, Flex-Abruf aller gespeicherten Queries, Steuerauszüge erzeugen.
-- **Verlauf**: Alle erzeugten Dateien je Jahr mit Download-Links.
+## Usage
 
-Es läuft immer nur ein Job gleichzeitig.
+- **Status**: The badge at the top shows whether the tool venv is found and `opensteuerauszug` is importable. The "Tool" section shows folder, origin, installation type and revision, and offers install or update.
+- **Kurslisten** (price lists): A table of the years from 2020 with status (not present / XML / XML + SQLite). "Herunterladen/Aktualisieren" (Download/Update) starts a background job with a live log. If the SQLite conversion fails (known error `UNIQUE constraint failed: signs.kl_id`, e.g. 2025), the half-finished `.sqlite` is deleted and the year is treated as "XML".
+- **IBKR-Daten** (IBKR data): Upload the Flex XML by drag and drop, or fetch it via the Flex Web Service (save the token and query IDs under "Flex Web Service").
+- **Steuerauszug erzeugen** (Generate tax statement): Choose the year (default: previous year), tick the files, and click "Steuerauszug erzeugen". If the Kursliste is missing, it is downloaded first. Results: `output\<year>\Steuerauszug_<account>_<year>.pdf/.xml`.
+- **Alles automatisch** (Everything automatically): Check/download the Kursliste, fetch all saved Flex queries, generate the tax statements.
+- **Verlauf** (History): All generated files per year with download links.
 
-## Getestete Tool-Version
+Only one job runs at a time.
 
-Upstream (opensteuerauszug) hat keine Tags oder Releases. Die App installiert deshalb nicht den jeweils neuesten Stand von `main`, sondern genau den Commit, der in `app\tool_version.json` eingetragen und mit dieser App getestet ist (Felder `repo`, `commit`, `tested_on`, `note`).
+## Tested tool version
 
-- **Installieren**: Git-Weg mit `git init`, `git fetch --depth 1 origin <commit>` und `git checkout --detach FETCH_HEAD` (Fallback: voller Clone und Checkout des Commits). Ohne git lädt die App das ZIP dieses Commits und merkt sich den Commit im Marker `.steuerauszug-assistent.json`.
-- **Tool aktualisieren** bringt das Tool auf diese getestete Version. Ein bestehender Klon (z.B. auf Branch `main`) bleibt dabei heil: untracked Dateien bleiben, es gibt kein `clean` und kein `reset --hard`. Der Klon steht danach auf einem festen Commit (detached HEAD); das Log nennt den Befehl zurück auf den Branch (z.B. `git checkout main`). Ist das Tool bereits auf der getesteten Version, passiert nichts; ist es neuer, warnt die App und stuft nicht zurück (nur per API mit `{"target": "tested", "force": true}`).
-- **Status**: Der Bereich "Tool" zeigt installierten und getesteten Commit sowie den Zustand (getestete Version / älter als getestet / neuer als getestet (ungetestet) / abweichend/unbekannt). Der Vergleich läuft lokal per `git merge-base --is-ancestor`, ohne Netzwerk. Fehlt der getestete Commit lokal in einem flachen Klon, lässt sich nichts sagen und es erscheint "abweichend/unbekannt".
-- **Neueste Version (ungetestet)**: Der unauffällige Button daneben (bzw. `POST /api/tool/update` mit `{"target": "latest"}`) holt `main`. Das kann die App unbrauchbar machen; "Tool aktualisieren" führt zurück auf die getestete Version.
-- **Pin anheben (Entwickler)**: Neuen Commit-SHA (40 Zeichen) und `tested_on` in `app\tool_version.json` eintragen, `.venv\Scripts\python.exe -m pytest -q` ausführen, einmal einen echten Lauf machen (frische Installation bzw. Update und Steuerauszug für ein Testjahr erzeugen) und danach die App neu veröffentlichen (Release).
+Upstream (opensteuerauszug) has no tags or releases. The app therefore does not install the latest state of `main`, but exactly the commit that is recorded in `app\tool_version.json` and tested with this app (fields `repo`, `commit`, `tested_on`, `note`).
 
-## Entwicklung
+- **Install**: Git route with `git init`, `git fetch --depth 1 origin <commit>` and `git checkout --detach FETCH_HEAD` (fallback: full clone and checkout of the commit). Without git, the app downloads the ZIP of that commit and records the commit in the marker `.steuerauszug-assistent.json`.
+- **Tool aktualisieren** (Update tool) brings the tool to this tested version. An existing clone (e.g. on branch `main`) stays intact: untracked files are kept, there is no `clean` and no `reset --hard`. The clone is then on a fixed commit (detached HEAD); the log shows the command to return to the branch (e.g. `git checkout main`). If the tool is already on the tested version, nothing happens; if it is newer, the app warns and does not downgrade (only via the API with `{"target": "tested", "force": true}`).
+- **Status**: The "Tool" section shows the installed and the tested commit as well as the state (tested version / older than tested / newer than tested (untested) / deviating/unknown). The comparison runs locally via `git merge-base --is-ancestor`, without network access. If the tested commit is missing locally in a shallow clone, no statement is possible and "abweichend/unbekannt" (deviating/unknown) is shown.
+- **Neueste Version (ungetestet)** (Latest version, untested): The unobtrusive button next to it (or `POST /api/tool/update` with `{"target": "latest"}`) fetches `main`. This can break the app; "Tool aktualisieren" takes you back to the tested version.
+- **Raising the pin (developers)**: Enter the new commit SHA (40 characters) and `tested_on` in `app\tool_version.json`, run `.venv\Scripts\python.exe -m pytest -q`, do one real run (fresh install or update, and generate a tax statement for a test year), and then republish the app (release).
+
+## Development
 
 `.venv\Scripts\python.exe -m pytest tests`
 
-Optionale Regressionstests mit echten Flex-XML-Dateien: Umgebungsvariable `OPENSTEUER_REAL_DATA_DIR` auf einen Ordner setzen; alle `*.xml` darin werden nur lesend getestet. Ohne Variable oder ohne Dateien werden diese Tests übersprungen.
+Optional regression tests with real Flex XML files: set the environment variable `OPENSTEUER_REAL_DATA_DIR` to a folder; all `*.xml` files in it are tested read-only. Without the variable or without files, these tests are skipped.
 
-## Lizenz
+## License
 
-[MIT](LICENSE). opensteuerauszug selbst steht unter eigener Lizenz (ebenfalls MIT, siehe dort) und ist nicht Teil dieses Repos; die App ruft es nur als separates Programm auf.
+[MIT](LICENSE). opensteuerauszug itself is under its own license (also MIT, see there) and is not part of this repo; the app only calls it as a separate program.
