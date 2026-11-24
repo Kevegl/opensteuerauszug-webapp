@@ -45,3 +45,35 @@ jobs:
       - name: Starter-Trockenlauf (Windows)
         if: runner.os == 'Windows'
         run: powershell -NoProfile -ExecutionPolicy Bypass -File start.ps1 -DryRun
+
+  build:
+    needs: test
+    name: Programm bauen (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Abhaengigkeiten installieren (App, PyInstaller, Tool im gepinnten Stand)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r packaging/requirements-build.txt
+      - id: build
+        name: Bauen
+        run: python packaging/build_app.py
+      - name: Kurztest der gebauten Version
+        run: python tests/smoke_app.py -- "${{ steps.build.outputs.exe }}"
+      - name: Als Artefakt ablegen
+        uses: actions/upload-artifact@v4
+        with:
+          name: Steuerauszug-Assistent-${{ runner.os }}
+          path: ${{ steps.build.outputs.zip }}
+          retention-days: 7
