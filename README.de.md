@@ -65,6 +65,10 @@ macOS/Linux: `.venv/bin/python -m pytest -q`
 
 Optionale Regressionstests mit echten Flex-XML-Dateien: Umgebungsvariable `OPENSTEUER_REAL_DATA_DIR` auf einen Ordner setzen; alle `*.xml` darin werden nur lesend getestet. Ohne Variable oder ohne Dateien werden diese Tests übersprungen.
 
+## Änderungen
+
+Siehe [CHANGELOG.md](CHANGELOG.md).
+
 ## Lizenz
 
 [MIT](LICENSE). opensteuerauszug selbst steht unter eigener Lizenz (ebenfalls MIT, siehe dort) und ist nicht Teil dieses Repos; die App ruft es nur als separates Programm auf.
