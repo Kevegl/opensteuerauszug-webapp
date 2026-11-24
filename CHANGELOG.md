@@ -2,38 +2,31 @@
 
 Alle nennenswerten Änderungen am Steuerauszug-Assistenten. Versionen folgen [Semantic Versioning](https://semver.org/lang/de/).
 
-## [v1.5.0] – <offen> – Programm für Windows und Mac
-
-Datum: unveröffentlicht.
+## [v1.5.0] – 2026-11-24 – Programm für Windows und Mac
 
 ### Neu
-- **Eigenständiges Programm** für Windows (x64) und macOS (Apple-Chip): herunterladen, entpacken, starten. Weder Python noch git noch eine Tool-Installation nötig.
-  - Das Tool opensteuerauszug ist samt Abhängigkeiten enthalten (genau der Commit aus `app/tool_version.json`). Die Karte „Tool“ zeigt „mitgeliefert, Version <Commit>“; Installieren und Aktualisieren des Tools sind ausgeblendet, `/api/tool/install` und `/api/tool/update` antworten mit 409.
-  - Das Programm ruft sich für das Tool selbst auf (`--run-tool <modul>`, feste Liste erlaubter Module; `--tool-kursliste-dir` statt beliebigem Code).
-  - Startprogramm `app/launcher.py`: erkennt eine bereits laufende App (öffnet nur den Browser), meldet einen fremd belegten Port, startet den Server im selben Prozess und öffnet den Browser. Kleines Statusfenster mit „Im Browser öffnen“, „Datenordner öffnen“ und „Beenden“ (ohne tkinter nur Konsole). Optionen `--no-browser` und `--no-window`. Ohne Konsole landet die Ausgabe in `<Datenordner>/logs/app.log`.
-  - Dasselbe Startprogramm läuft auch in der Python-Variante: `python -m app.launcher`.
-- **Programm-Update per Klick** (nur im Programm; die Python-Variante aktualisiert sich weiter per Git): Karte „App-Version“.
-  - **Prüfen** über die GitHub-API (`releases/latest`, Timeout, User-Agent `Steuerauszug-Assistent/<Version>`, keine persönlichen Daten): numerischer Versionsvergleich, Entwürfe und Vorabversionen werden ignoriert, die ZIP-Datei wird nach System und Architektur gewählt. Automatische Prüfung höchstens einmal täglich beim Start im Hintergrund (Ergebnis in `<Datenordner>/updates/status.json`), abschaltbar mit „Automatisch nach Updates suchen“; Hinweis im Kopf, wenn ein Update gefunden wurde. Release-Notizen werden als Text angezeigt.
-  - **Installieren nur auf Klick** (Job mit Live-Log): Download mit Größenlimit (200 MB) und Fortschritt, SHA-256-Prüfung gegen `<zip>.sha256` (Abbruch bei Abweichung), sicheres Entpacken nach `<Datenordner>/versions/<Version>/` (kein Zip-Slip, Symlinks nur auf macOS innerhalb der `.app`), Prüfung der Programmdatei.
-  - **Neustart und Versionswechsel**: `POST /api/app/restart` startet das Programm neu (ohne zweiten Browser-Tab). Das startende Programm wechselt auf die neue Version und wartet bis zu 60 s auf `/api/health` mit dieser Version; sonst beendet es sie und startet **automatisch wieder die vorherige** (Hinweis „Update auf X ist fehlgeschlagen, vorherige Version läuft“; kein automatischer zweiter Versuch). Eine von Hand gestartete, neuere Version gewinnt.
-  - **„Vorherige Version wiederherstellen“** (`POST /api/app/update/rollback`). Es bleiben höchstens zwei Versionen erhalten.
-  - Neue Einstellung `auto_update_check` (Standard an). `POST /api/app/update/check` liefert immer ein Ergebnis (Fehler als deutsche Meldung in `error`).
-- **Gemeinsamer Datenordner** für beide Varianten: Windows `%LOCALAPPDATA%\Steuerauszug-Assistent`, macOS `~/Library/Application Support/Steuerauszug-Assistent`, Linux `~/.local/share/steuerauszug-assistent` (überschreibbar mit `STEUERAUSZUG_DATA_DIR`). Darin `settings.json`, `work/uploads`, `output`.
-  - Einmalige Migration: Liegen im Projektordner noch `settings.json`, `work/` oder `output/` und hat der Datenordner keine `settings.json`, werden sie dorthin **kopiert** (nichts verschoben, nichts überschrieben, Marker `.migriert-aus-projektordner`).
-  - Neuer Bereich „Daten“ mit dem Datenordner, „Ordner öffnen“, „Ergebnisse öffnen“ (`POST /api/open-folder`, nur die festen Ziele `data` und `output`) und „App beenden“ (`POST /api/app/quit`).
-- `/api/status` liefert zusätzlich `app_version_number` (aus der neuen Datei `app/VERSION`), `bundled`, `data_dir` und `output_dir`; neu: `/api/health`.
+- **Programm zum Herunterladen:** Für Windows (`.exe`) und Mac mit Apple-Chip (`.app`) gibt es unter Releases je eine ZIP-Datei: herunterladen, entpacken, doppelklicken. Python, git und eine Tool-Installation sind nicht mehr nötig.
+  - opensteuerauszug ist in der getesteten Version bereits enthalten. Die Karte „Tool“ zeigt „mitgeliefert“, die Knöpfe zum Installieren und Aktualisieren des Tools entfallen.
+  - Beim ersten Start warnt Windows („Der Computer wurde durch Windows geschützt“): „Weitere Informationen“ → „Trotzdem ausführen“. Auf dem Mac: Rechtsklick → „Öffnen“, oder Systemeinstellungen → Datenschutz & Sicherheit → „Dennoch öffnen“.
+  - Ein kleines **Statusfenster** zeigt, dass die App läuft, mit „Im Browser öffnen“, „Datenordner öffnen“ und „Beenden“. Läuft die App schon, öffnet ein weiterer Start nur den Browser.
+- **Update per Klick im Programm:** Die Karte „App-Version“ sucht einmal täglich nach einer neuen Version (abschaltbar) und zeigt deren Release-Notizen.
+  - Installiert wird nur auf Klick. Die Datei wird mit ihrer Prüfsumme kontrolliert, dann startet das Programm neu.
+  - Startet die neue Version nicht, läuft automatisch wieder die vorherige, mit einem Hinweis in der Oberfläche.
+  - „Vorherige Version wiederherstellen“ holt die zuletzt genutzte Version zurück.
+- **Daten im Benutzerprofil:** Einstellungen, hochgeladene Flex-Dateien und erzeugte Steuerauszüge liegen jetzt getrennt vom Programm. Programm und Python-Variante nutzen denselben Ordner, Updates rühren ihn nicht an.
+  - Windows: `%LOCALAPPDATA%\Steuerauszug-Assistent`
+  - macOS: `~/Library/Application Support/Steuerauszug-Assistent`
+  - Linux: `~/.local/share/steuerauszug-assistent`
+  - Neuer Bereich „Daten“ mit „Ordner öffnen“, „Ergebnisse öffnen“ und „App beenden“.
 
 ### Für Entwickler
-- Build mit PyInstaller: `packaging/build_app.py` (Abhängigkeiten in `packaging/requirements-build.txt`; `--out <Ordner>` baut anderswohin), Kurztest `tests/smoke_app.py`. Der Build legt neben das ZIP die Prüfsumme `<zip>.sha256`; der Release-Workflow hängt beide an. Die Namen der Release-Dateien entstehen in `app/paths.py` (`asset_name`) und gelten für Build und Update-Suche.
-- Versionsverwaltung in `app/versions.py` (Zustand `<Datenordner>/versions/state.json`: current, previous, pending, failed), Update-Logik in `app/program_update.py`, Neustart im Launcher.
-- `tests/update_e2e.py` (nicht von pytest gesammelt): baut zwei Versionen, startet ein Fake-GitHub auf 127.0.0.1 und prüft Update, Rollback und die automatische Rückkehr bei einer nicht startenden Version. Tests sprechen nie das echte GitHub an.
-- Neuer Workflow `.github/workflows/release.yml`: prüft Tag gegen `app/VERSION`, legt bei einem gepushten Tag das Release mit den Notizen aus diesem Changelog an und hängt die ZIP-Dateien für Windows und macOS an.
-- Die Start-Skripte (`start.bat`, `start.ps1`, `start.command`) bleiben unverändert, inklusive Neustart nach einem Update (Exit-Code 3).
-- Tests nutzen immer einen temporären Datenordner und berühren das echte Benutzerprofil nie.
-- `STEUERAUSZUG_BUNDLED_TOOL=1` erzwingt den Bundled-Modus auch in der Python-Variante.
+- Build mit PyInstaller über `packaging/build_app.py`, Kurztest des gebauten Programms mit `tests/smoke_app.py`, End-to-End-Test des Updates mit `tests/update_e2e.py`.
+- GitHub Actions baut das Programm bei jedem Push auf Windows und macOS und testet es kurz. Beim Veröffentlichen eines Releases hängt `release.yml` die ZIP-Dateien und ihre Prüfsummen (`.sha256`) an. Der Tag muss zu `app/VERSION` passen.
+- Die Python-Variante (`start.bat`, `start.command`, `start.sh`) bleibt erhalten und aktualisiert sich weiter per git.
 
 ### Update von v1.4.0
-Die Python-Variante aktualisiert sich wie bisher per Knopf. Beim ersten Start der neuen Version werden `settings.json`, `work/` und `output/` aus dem Projektordner in den Datenordner kopiert; die alten Dateien können danach von Hand gelöscht werden.
+- **Python-Variante:** In der Karte „App-Version“ auf „Nach Updates suchen“ und „Update installieren“ klicken. Beim ersten Start kopiert die App `settings.json`, `work/` und `output/` aus dem Projektordner in den neuen Datenordner. Die Originale bleiben liegen und können danach von Hand gelöscht werden.
+- **Umstieg aufs Programm:** Zuerst einmal die Python-Variante in v1.5.0 starten, damit die Daten in den Datenordner kopiert werden. Danach das Programm herunterladen und starten, es findet die Daten dort.
 
 ## [v1.4.0] – 2026-11-24 – macOS-Version und App-Update
 
