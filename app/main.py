@@ -4,13 +4,13 @@ from __future__ import annotations
 import datetime as dt
 import os
 from xml.parsers import expat
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from fastapi import Body, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import kursliste, runner, settings as st, toolsetup, workflow
+from . import kursliste, runner, selfupdate, settings as st, toolsetup, workflow
 from .jobs import JobManager
 
 STATIC_DIR = st.BASE_DIR / "static"
@@ -21,6 +21,9 @@ ALLOWED_ROOTS = {"FlexQueryResponse", "FlexStatements"}
 
 app = FastAPI(title="Steuerauszug-Assistent")
 jobs = JobManager()
+# Injizierbar, damit Tests den Prozess nicht beenden.
+exit_process = os._exit
+RESTART_DELAY = 0.5
 
 
 def _settings() -> dict:
@@ -47,10 +50,36 @@ def api_status():
     info = runner.check_tool(s["tool_repo"])
     info.update(toolsetup.describe(s["tool_repo"], s.get("tool_repo_source", "settings")))
     info["app"] = "steuerauszug-assistent"
+    info["app_version"] = selfupdate.app_version()
     info["default_year"] = dt.date.today().year - 1
     running = jobs.running()
     info["running_job"] = running.id if running else None
     return info
+
+
+@app.get("/api/app/update")
+def api_app_update_status():
+    return selfupdate.status()
+
+
+@app.post("/api/app/update/check")
+def api_app_update_check():
+    return selfupdate.check()
+
+
+@app.post("/api/app/update/apply")
+def api_app_update_apply():
+    return _start("app-update", "App aktualisieren", selfupdate.job_apply())
+
+
+@app.post("/api/app/restart")
+def api_app_restart():
+    if jobs.running():
+        raise HTTPException(409, "Es läuft ein Job. Bitte warten, bis er beendet ist.")
+    if not selfupdate.restart_supported():
+        raise HTTPException(400, "Bitte das Fenster schließen und start.bat / start.command erneut starten.")
+    selfupdate.schedule_restart(lambda code: exit_process(code), RESTART_DELAY)
+    return {"restarting": True}
 
 
 @app.post("/api/tool/install")
@@ -146,7 +175,7 @@ async def api_upload(files: list[UploadFile] = File(...)):
     seen: set[str] = set()
     for f in files:
         label = f.filename or "upload.xml"
-        name = runner.safe_name(Path(label).name)
+        name = runner.safe_name(PurePosixPath(label.replace("\\", "/")).name)
         if not name.lower().endswith(".xml"):
             errors.append(f"{label}: nur XML-Dateien (.xml) erlaubt.")
             continue

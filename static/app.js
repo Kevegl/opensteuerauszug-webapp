@@ -2,6 +2,7 @@
 const $ = (s) => document.querySelector(s);
 let queries = [];
 let busy = false;
+let appState = null;
 
 async function api(path, opts = {}) {
   const r = await fetch(path, opts);
@@ -123,7 +124,7 @@ async function runJob(path, body) {
     }
   } catch (e) { log("FEHLER: " + e.message); }
   setBusy(false);
-  loadStatus().catch(() => {}); loadKursliste().catch(() => {}); loadHistory(); loadFiles();
+  loadStatus().catch(() => {}); loadKursliste().catch(() => {}); loadHistory(); loadFiles(); loadAppUpdate();
 }
 
 async function upload(fileList) {
@@ -164,7 +165,98 @@ const drop = $("#drop");
 ["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
 drop.addEventListener("drop", (e) => upload(e.dataTransfer.files));
 
+// ---- App-Update ----
+function appMsg(text, cls) {
+  const m = $("#app-msg");
+  m.hidden = !text; m.textContent = text || ""; m.className = "hint " + (cls || "");
+}
+
+function renderApp(u) {
+  appState = u;
+  const info = $("#app-info");
+  $("#app-nogit").hidden = u.is_git;
+  $("#btn-app-check").hidden = !u.is_git;
+  if (!u.is_git) {
+    info.textContent = "Update nicht verfügbar: " + (u.reason || "unbekannt");
+    $("#btn-app-apply").hidden = true; $("#btn-app-restart").hidden = true; $("#app-commits").hidden = true;
+    appMsg("");
+    return;
+  }
+  info.textContent = `Version: ${u.version || u.commit || "unbekannt"} | Branch: ${u.branch || "(losgelöst)"}` +
+    (u.upstream ? ` | Upstream: ${u.upstream}` : "");
+  const c = u.last_check;
+  const avail = !!(c && c.ok && c.update_available && !u.restart_required);
+  const list = $("#app-commits");
+  list.hidden = !(avail && c.commits.length);
+  list.innerHTML = avail ? c.commits.map((x) => `<li><code>${esc(x.hash)}</code>${esc(x.subject)}</li>`).join("") : "";
+  const apply = $("#btn-app-apply");
+  apply.hidden = !avail;
+  apply.disabled = busy || !!u.blocker || (c && c.ahead > 0);
+  const restart = $("#btn-app-restart");
+  restart.hidden = !(u.restart_required && u.restart_supported);
+  restart.disabled = busy;
+  if (u.restart_required) {
+    appMsg(u.restart_supported ? "Update installiert. Zum Aktivieren die App neu starten."
+      : "Update installiert. Bitte das Fenster schließen und start.bat / start.command erneut starten.", "app-ok");
+  } else if (u.blocker) {
+    appMsg(u.blocker, "app-warn");
+  } else if (c && !c.ok) {
+    appMsg(c.error, "app-err");
+  } else if (c && c.ahead > 0) {
+    appMsg(`Der lokale Stand ist ${c.ahead} Commit(s) voraus; automatisches Update nicht möglich.`, "app-warn");
+  } else if (c && c.update_available) {
+    appMsg(`${c.behind} neue Änderung${c.behind === 1 ? "" : "en"}` + (c.latest_tag ? ` (Version ${c.latest_tag})` : ""), "app-warn");
+  } else if (c) {
+    appMsg("Aktuell.", "app-ok");
+  } else {
+    appMsg("");
+  }
+}
+
+async function loadAppUpdate() {
+  try { renderApp(await api("/api/app/update")); }
+  catch (e) { $("#app-info").textContent = "App-Version: " + e.message; }
+}
+
+async function checkAppUpdate() {
+  const btn = $("#btn-app-check");
+  btn.disabled = true; appMsg("Suche ...");
+  try {
+    const r = await api("/api/app/update/check", json("POST", {}));
+    const u = await api("/api/app/update");
+    u.last_check = r;
+    renderApp(u);
+  } catch (e) { appMsg("FEHLER: " + e.message, "app-err"); }
+  btn.disabled = false;
+}
+
+async function restartApp() {
+  if (!confirm("Die App jetzt neu starten?")) return;
+  setBusy(true);
+  appMsg("Neustart läuft ...", "app-warn");
+  try { await api("/api/app/restart", json("POST", {})); }
+  catch (e) { appMsg("FEHLER: " + e.message, "app-err"); setBusy(false); return; }
+  const deadline = Date.now() + 60000;
+  await new Promise((r) => setTimeout(r, 1500));
+  while (Date.now() < deadline) {
+    try {
+      const r = await fetch("/api/status", { cache: "no-store" });
+      if (r.ok) { location.reload(); return; }
+    } catch (_) { /* Server noch nicht erreichbar */ }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  appMsg("Die App ist nach 60 s nicht wieder erreichbar. Bitte start.bat / start.command prüfen.", "app-err");
+  setBusy(false);
+}
+
+$("#btn-app-check").onclick = checkAppUpdate;
+$("#btn-app-apply").onclick = async () => {
+  if (!confirm("Update jetzt installieren? Nur Fast-Forward, eigene Daten (Einstellungen, Uploads, Ergebnisse) bleiben unberührt.")) return;
+  await runJob("/api/app/update/apply", {});
+};
+$("#btn-app-restart").onclick = restartApp;
+
 (async () => {
   await loadStatus().catch((e) => log(e.message));
-  loadSettings(); loadKursliste().catch(() => {}); loadFiles(); loadHistory();
+  loadSettings(); loadKursliste().catch(() => {}); loadFiles(); loadHistory(); loadAppUpdate();
 })();

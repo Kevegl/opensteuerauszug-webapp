@@ -21,6 +21,7 @@ from pathlib import Path, PurePosixPath
 from typing import Callable
 
 from . import runner
+from .platform_utils import git_usable
 
 Log = Callable[[str], None]
 
@@ -51,7 +52,8 @@ def default_base_python() -> str:
     base = getattr(sys, "_base_executable", None)
     if base and Path(base).exists() and Path(base).resolve() != Path(sys.executable).resolve():
         return str(base)
-    for cand in (Path(sys.base_prefix) / "python.exe", Path(sys.base_prefix) / "bin" / "python3"):
+    for cand in (Path(sys.base_prefix) / "python.exe", Path(sys.base_prefix) / "bin" / "python3",
+                 Path(sys.base_prefix) / "bin" / "python"):
         if cand.exists():
             return str(cand)
     return sys.executable
@@ -76,12 +78,18 @@ class Deps:
     which: Callable[[str], str | None] = shutil.which
     download: Callable = default_download           # (url, dest, log) -> None
     base_python: Callable[[], str] = default_base_python
+    platform: str | None = None  # Override für Tests (sonst sys.platform)
     check_tool: Callable = runner.check_tool
     tmp_root: Path | None = None
     zip_url: str | None = None   # Override für Tests; sonst aus Pin bzw. main abgeleitet
     repo_url: str | None = None  # Override für Tests; sonst aus dem Pin
     pin: dict | None = None      # Override für Tests; sonst app/tool_version.json
     extra: dict = field(default_factory=dict)
+
+
+def has_git(deps: Deps) -> bool:
+    """git vorhanden und benutzbar (auf macOS ohne Xcode-CLT zählt der /usr/bin/git-Stub nicht)."""
+    return git_usable(deps.which, lambda cmd: deps.run_capture(cmd, Path.cwd())[0], deps.platform)
 
 
 # --------------------------------------------------------------------------- Befehle (rein)
@@ -244,7 +252,7 @@ def installed_version(repo: str | Path, deps: Deps | None = None) -> str | None:
     if not repo.is_dir():
         return None
     kind = detect_install_kind(repo)
-    if kind == "git" and deps.which("git"):
+    if kind == "git" and has_git(deps):
         code, out = deps.run_capture(build_git_head_cmd(), repo)
         commit = out.strip().splitlines()[0].strip() if code == 0 and out.strip() else None
         if commit:
@@ -374,7 +382,7 @@ def version_status(repo: str | Path, deps: Deps | None = None) -> dict:
     out.update(tested_commit=_short(pin["commit"]), tested_commit_full=pin["commit"], tested_on=pin.get("tested_on"))
     state, head, text = "unknown", None, None
     kind = detect_install_kind(repo) if repo.is_dir() else "unknown"
-    if kind == "git" and deps.which("git"):
+    if kind == "git" and has_git(deps):
         state, head = git_relation(deps, repo, pin["commit"])
         if state == "older" and not _pin_is_local(deps, repo, pin["commit"]):
             text = STATE_TEXT["older_diverged"]  # offline nicht von divergierter Historie unterscheidbar
@@ -592,7 +600,7 @@ def ensure_venv(deps: Deps, repo: Path, log: Log) -> None:
     log(f"Lege venv an mit {base}")
     _step(deps, build_venv_cmd(base, repo), repo, log, "venv anlegen")
     if not runner.tool_python(repo).exists():
-        raise SetupError("venv wurde nicht angelegt (.venv\\Scripts\\python.exe fehlt).")
+        raise SetupError(f"venv wurde nicht angelegt ({runner.venv_python_hint()} fehlt).")
 
 
 def pip_install(deps: Deps, repo: Path, log: Log, upgrade_pip: bool = True) -> None:
@@ -659,7 +667,7 @@ def run_install(settings: dict, log: Log, deps: Deps | None = None) -> bool:
             raise SetupError(
                 "Der Zielordner ist nicht leer und enthält kein Tool (keine pyproject.toml). "
                 "Bitte einen leeren Ordner wählen oder den Ordner leeren.")
-        elif deps.which("git"):
+        elif has_git(deps):
             repo.parent.mkdir(parents=True, exist_ok=True)
             _install_git(repo, deps, log, pin)
         else:
@@ -695,7 +703,7 @@ def _update_git(repo: Path, deps: Deps, log: Log, pin: dict, latest: bool, force
     Es gibt weder clean noch reset --hard: Untracked Dateien bleiben, ein Checkout, der lokale
     Änderungen überschreiben würde, schlägt von selbst fehl.
     """
-    if not deps.which("git"):
+    if not has_git(deps):
         raise SetupError("git wurde nicht gefunden, die Git-Installation kann nicht aktualisiert werden.")
     commit = pin["commit"]
     if not latest:

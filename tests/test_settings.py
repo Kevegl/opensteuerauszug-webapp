@@ -2,6 +2,7 @@
 import json
 
 from app import settings as st
+from app.platform_utils import venv_python
 
 
 def test_mask_token_variants():

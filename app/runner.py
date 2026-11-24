@@ -10,13 +10,15 @@ import subprocess
 from pathlib import Path
 from typing import Callable, Iterable
 
+from .platform_utils import venv_python, venv_python_hint
+
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 ACCOUNT_RE = re.compile(r"<AccountInformation\b[^>]*?\baccountId=\"([^\"]+)\"")
 SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def tool_python(repo: str | Path) -> Path:
-    return Path(repo) / ".venv" / "Scripts" / "python.exe"
+    return venv_python(Path(repo) / ".venv")
 
 
 def build_steuerauszug_cmd(
@@ -167,7 +169,7 @@ def check_tool(repo: str | Path) -> dict:
     if not info["repo_exists"]:
         info["message"] = "Tool-Ordner nicht gefunden."
     elif not info["python_exists"]:
-        info["message"] = "Tool-venv (.venv\\Scripts\\python.exe) nicht gefunden."
+        info["message"] = f"Tool-venv ({venv_python_hint()}) nicht gefunden."
     else:
         code, out = run_capture(build_check_cmd(repo), repo)
         info["importable"] = code == 0 and "ok" in out

@@ -1,0 +1,47 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Git-Identitaet fuer Tests setzen
+        run: |
+          git config --global user.name "ci"
+          git config --global user.email "ci@example.invalid"
+
+      - name: Abhaengigkeiten installieren
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Tests ausfuehren
+        run: python -m pytest -q
+
+      - name: Starter-Syntax pruefen (macOS/Linux)
+        if: runner.os != 'Windows'
+        run: bash -n start.command
+
+      - name: Starter-Trockenlauf (macOS/Linux)
+        if: runner.os != 'Windows'
+        env:
+          STEUERAUSZUG_NO_BROWSER: "1"
+        run: bash start.command --dry-run
+
+      - name: Starter-Trockenlauf (Windows)
+        if: runner.os == 'Windows'
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File start.ps1 -DryRun

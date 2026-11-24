@@ -7,6 +7,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from .platform_utils import venv_python
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 SETTINGS_FILE = BASE_DIR / "settings.json"
 UPLOAD_DIR = BASE_DIR / "work" / "uploads"
@@ -32,7 +34,7 @@ def resolve_tool_repo(explicit: str | None) -> tuple[str, str]:
     """Wählt den Tool-Ordner. Rückgabe: (Pfad, Herkunft) mit Herkunft settings | env | home | app.
 
     Reihenfolge: settings.json, Umgebungsvariable, bestehende Installation unter
-    %USERPROFILE%/opensteuerauszug (nur mit vorhandenem .venv), sonst app-eigener Ordner.
+    ~/opensteuerauszug (Windows: %USERPROFILE%) (nur mit vorhandenem .venv), sonst app-eigener Ordner.
     """
     if explicit and explicit.strip():
         return explicit.strip(), "settings"
@@ -40,7 +42,7 @@ def resolve_tool_repo(explicit: str | None) -> tuple[str, str]:
     if env and env.strip():
         return env.strip(), "env"
     home = home_tool_dir()
-    if (home / ".venv" / "Scripts" / "python.exe").exists():
+    if venv_python(home / ".venv").exists():
         return str(home), "home"
     return str(APP_TOOL_DIR), "app"
 

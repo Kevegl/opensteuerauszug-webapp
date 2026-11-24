@@ -42,3 +42,8 @@ pre#log { background: var(--log-bg); color: var(--log-fg); padding: 12px; border
 .hist-files a { display: inline-block; margin-right: 14px; color: var(--accent); }
 button.subtle { background: transparent; color: var(--muted); border-style: dashed; }
 .ver-tested { color: var(--ok); } .ver-older { color: var(--warn); } .ver-newer, .ver-unknown { color: var(--muted); }
+
+pre.code { background: var(--log-bg); color: var(--log-fg); padding: 8px 12px; border-radius: 6px; margin: 6px 0; font: 12.5px/1.4 Consolas, Menlo, monospace; overflow: auto; user-select: all; }
+.commits { margin: 8px 0; padding-left: 18px; font-size: 13px; }
+.commits code { color: var(--muted); margin-right: 6px; }
+.app-ok { color: var(--ok); } .app-warn { color: var(--warn); } .app-err { color: var(--err); }

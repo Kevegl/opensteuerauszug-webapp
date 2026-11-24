@@ -21,6 +21,22 @@
       <button id="btn-tool-latest" class="small subtle" hidden title="Ungetestet, kann die App unbrauchbar machen">Neueste Version (ungetestet)</button></div>
   </section>
 
+  <section class="card" id="sec-app">
+    <h2>App-Version</h2>
+    <p class="hint" id="app-info">Prüfe ...</p>
+    <p class="hint" id="app-msg" hidden></p>
+    <div id="app-nogit" hidden>
+      <p class="hint">Update-Funktion nur bei Installation per <code>git clone</code> verfügbar:</p>
+      <pre class="code">git clone https://github.com/kevegl/opensteuerauszug-webapp.git</pre>
+    </div>
+    <ul id="app-commits" class="commits" hidden></ul>
+    <div class="row">
+      <button id="btn-app-check" hidden>Nach Updates suchen</button>
+      <button id="btn-app-apply" class="primary" hidden>Update installieren</button>
+      <button id="btn-app-restart" class="primary" hidden>Jetzt neu starten</button>
+    </div>
+  </section>
+
   <section class="card" id="sec-year">
     <h2>Steuerjahr</h2>
     <div class="row">

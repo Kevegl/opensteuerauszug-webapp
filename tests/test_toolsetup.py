@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from app import main, runner, settings as st, toolsetup as ts
 from app.jobs import JobManager
+from app.platform_utils import venv_python
 
 OLD_LINE = '    "ibflex @ git+https://github.com/vroonhof/ibflex.git",'
 NEW_LINE = '    "ibflex2 @ git+https://github.com/vroonhof/ibflex.git",'
@@ -55,7 +56,7 @@ def clean_env(monkeypatch, tmp_path):
 
 
 def _make_home_venv(home_tool: Path) -> None:
-    py = home_tool / ".venv" / "Scripts" / "python.exe"
+    py = venv_python(home_tool / ".venv")
     py.parent.mkdir(parents=True)
     py.write_bytes(b"")
 
@@ -84,7 +85,7 @@ def test_resolve_blank_env_is_ignored(clean_env, monkeypatch):
 
 def test_resolve_home_only_with_venv_python(clean_env):
     home_tool, app_tool = clean_env
-    home_tool.mkdir(parents=True)  # Ordner ohne .venv\Scripts\python.exe
+    home_tool.mkdir(parents=True)  # Ordner ohne venv-Python
     assert st.resolve_tool_repo("") == (str(app_tool), "app")
     _make_home_venv(home_tool)
     assert st.resolve_tool_repo("") == (str(home_tool), "home")
@@ -294,8 +295,8 @@ def test_replace_keeps_config_identifiers_venv_and_foreign_files(tmp_path):
     wr(repo / "output" / "2025" / "x.pdf", "pdf")
     wr(repo / "src" / "opensteuerauszug" / "alt.py", "alt")
     ts.write_marker(repo, files=["src/opensteuerauszug/alt.py"])
-    (repo / ".venv" / "Scripts").mkdir(parents=True)
-    (repo / ".venv" / "Scripts" / "python.exe").write_bytes(b"venv")
+    venv_python(repo / ".venv").parent.mkdir(parents=True)
+    (venv_python(repo / ".venv")).write_bytes(b"venv")
 
     src = tmp_path / "neu"
     wr(src / "pyproject.toml", "neu")
@@ -303,8 +304,8 @@ def test_replace_keeps_config_identifiers_venv_and_foreign_files(tmp_path):
     wr(src / "data" / "security_identifiers.csv", "NEW-IDS")
     wr(src / "data" / "neu.csv", "neu")
     wr(src / "src" / "opensteuerauszug" / "__init__.py", "neu")
-    (src / ".venv" / "Scripts").mkdir(parents=True)
-    (src / ".venv" / "Scripts" / "python.exe").write_bytes(b"NEWVENV")
+    venv_python(src / ".venv").parent.mkdir(parents=True)
+    (venv_python(src / ".venv")).write_bytes(b"NEWVENV")
 
     logs = []
     ts.replace_zip_source(src, repo, logs.append)
@@ -313,7 +314,7 @@ def test_replace_keeps_config_identifiers_venv_and_foreign_files(tmp_path):
     assert (repo / "data" / "security_identifiers.csv").read_text() == "USER-IDS"
     assert (repo / "data" / "neu.csv").read_text() == "neu"
     assert (repo / "data" / "eigene.csv").read_text() == "alt"  # fremde Datei im data-Ordner bleibt
-    assert (repo / ".venv" / "Scripts" / "python.exe").read_bytes() == b"venv"
+    assert (venv_python(repo / ".venv")).read_bytes() == b"venv"
     assert (repo / "notes.txt").read_text() == "meine Notizen"
     assert (repo / "output" / "2025" / "x.pdf").read_text() == "pdf"
     assert (repo / "pyproject.toml").read_text() == "neu"
@@ -405,7 +406,7 @@ def fake_streaming(calls, fail_substr=None, clone_pyproject=None, head_text=""):
             # Fake-Checkout legt bei einer Neuinstallation pyproject.toml an.
             wr(Path(cwd) / "pyproject.toml", clone_pyproject if clone_pyproject is not None else pyproject(OLD_LINE))
         if cmd[1:3] == ["-m", "venv"]:
-            py = Path(cmd[-1]) / "Scripts" / "python.exe"
+            py = venv_python(Path(cmd[-1]))
             py.parent.mkdir(parents=True, exist_ok=True)
             py.write_bytes(b"")
         return 0
@@ -481,7 +482,7 @@ def test_install_git_command_order(tmp_path):
     logs = []
     deps = make_deps(tmp_path, calls, cap, clone_pyproject=pyproject(OLD_LINE))
     assert ts.run_install({"tool_repo": str(repo)}, logs.append, deps) is True
-    py = str(repo / ".venv" / "Scripts" / "python.exe")
+    py = str(venv_python(repo / ".venv"))
     assert calls == [
         ["git", "init"],
         ["git", "remote", "add", "origin", "https://example.invalid/repo.git"],
@@ -519,7 +520,7 @@ def test_install_zip_path_without_git(tmp_path):
     assert NEW_LINE in (repo / "pyproject.toml").read_text(encoding="utf-8")
     marker = ts.read_marker(repo)
     assert marker["kind"] == "zip" and marker["source"] == "https://example.invalid/main.zip"
-    py = str(repo / ".venv" / "Scripts" / "python.exe")
+    py = str(venv_python(repo / ".venv"))
     assert calls[-2:] == [[py, "-m", "pip", "install", "--upgrade", "pip"], [py, "-m", "pip", "install", "."]]
     _no_destructive(calls)
 
@@ -562,7 +563,7 @@ def _make_installed(repo: Path, working: str, git: bool = True):
     else:
         ts.write_marker(repo, source="https://example.invalid/main.zip")
     wr(repo / "pyproject.toml", working)
-    py = repo / ".venv" / "Scripts" / "python.exe"
+    py = venv_python(repo / ".venv")
     py.parent.mkdir(parents=True)
     py.write_bytes(b"")
 
@@ -574,7 +575,7 @@ def test_update_git_fix_only_fetches_checks_out_and_refixes(tmp_path):
     logs = []
     deps = make_deps(tmp_path, calls, cap, head=pyproject(OLD_LINE), has_pin=False)
     assert ts.run_update({"tool_repo": str(repo)}, logs.append, deps) is True
-    py = str(repo / ".venv" / "Scripts" / "python.exe")
+    py = str(venv_python(repo / ".venv"))
     assert calls == [
         ["git", "fetch", "origin", PIN_SHA],
         ["git", "checkout", "--", "pyproject.toml"],
@@ -745,7 +746,7 @@ def test_update_zip_keeps_user_files_and_updates_source(tmp_path):
     assert (repo / "src" / "opensteuerauszug" / "__init__.py").read_text() == "neu"
     marker = ts.read_marker(repo)
     assert marker["kind"] == "zip" and marker["commit"] == PIN_SHA
-    py = str(repo / ".venv" / "Scripts" / "python.exe")
+    py = str(venv_python(repo / ".venv"))
     assert calls == [[py, "-m", "pip", "install", "."]]
     assert cap == []
     _no_destructive(calls)

@@ -559,3 +559,88 @@ def test_real_files_all_in_one_upload(env):
     r = _upload(env, files)
     assert r.status_code == 200
     assert sorted(r.json()["saved"]) == sorted(REAL_FILES)
+
+
+# ---------------------------------------------------------------- App-Update / Neustart
+
+from app import selfupdate  # noqa: E402
+
+
+@pytest.fixture
+def exits(monkeypatch):
+    got = []
+    done = threading.Event()
+
+    def fake_exit(code):
+        got.append(code)
+        done.set()
+
+    monkeypatch.setattr(main, "exit_process", fake_exit)
+    monkeypatch.setattr(main, "RESTART_DELAY", 0)
+    selfupdate.reset_state()
+    monkeypatch.delenv("STEUERAUSZUG_LAUNCHER", raising=False)
+    return got, done
+
+
+def test_app_update_status_endpoint(env, monkeypatch):
+    monkeypatch.setattr(selfupdate, "status", lambda deps=None: {"is_git": False, "reason": "kein Git-Klon"})
+    body = env["client"].get("/api/app/update").json()
+    assert body == {"is_git": False, "reason": "kein Git-Klon"}
+
+
+def test_app_update_check_endpoint(env, monkeypatch):
+    monkeypatch.setattr(selfupdate, "check", lambda deps=None: {"ok": True, "update_available": True, "behind": 2})
+    assert env["client"].post("/api/app/update/check").json()["behind"] == 2
+
+
+def test_app_update_apply_is_job(env, monkeypatch):
+    monkeypatch.setattr(selfupdate, "job_apply", lambda deps=None: (lambda job: (job.log("Update installiert"), True)[1]))
+    r = env["client"].post("/api/app/update/apply")
+    assert r.status_code == 200
+    jid = r.json()["job_id"]
+    for _ in range(100):
+        snap = env["client"].get(f"/api/jobs/{jid}").json()
+        if snap["status"] != "running":
+            break
+        threading.Event().wait(0.05)
+    assert snap["status"] == "done" and "Update installiert" in snap["lines"]
+
+
+def test_app_update_apply_409_when_job_running(env):
+    gate = threading.Event()
+    main.jobs.start("x", "x", lambda job: gate.wait(5) or True)
+    try:
+        assert env["client"].post("/api/app/update/apply").status_code == 409
+    finally:
+        gate.set()
+
+
+def test_restart_400_without_launcher(env, exits):
+    got, _ = exits
+    r = env["client"].post("/api/app/restart")
+    assert r.status_code == 400 and "start.command" in r.json()["detail"]
+    assert got == []
+
+
+def test_restart_409_when_job_running(env, exits, monkeypatch):
+    monkeypatch.setenv("STEUERAUSZUG_LAUNCHER", "1")
+    gate = threading.Event()
+    main.jobs.start("x", "x", lambda job: gate.wait(5) or True)
+    try:
+        assert env["client"].post("/api/app/restart").status_code == 409
+    finally:
+        gate.set()
+    assert exits[0] == []
+
+
+def test_restart_exits_with_code_3(env, exits, monkeypatch):
+    monkeypatch.setenv("STEUERAUSZUG_LAUNCHER", "1")
+    got, done = exits
+    r = env["client"].post("/api/app/restart")
+    assert r.status_code == 200 and r.json() == {"restarting": True}
+    assert done.wait(2) and got == [3]
+
+
+def test_status_has_app_version(env, monkeypatch):
+    monkeypatch.setattr(selfupdate, "app_version", lambda deps=None: "v1.2-3-gabc")
+    assert env["client"].get("/api/status").json()["app_version"] == "v1.2-3-gabc"

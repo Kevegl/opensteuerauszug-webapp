@@ -288,7 +288,8 @@ if ($state -ne 'ok') {
 
 if ($DryRun) {
     Write-DryInfo "Wuerde ausfuehren: .venv\Scripts\python.exe -m pip install --quiet -r requirements.txt"
-    Write-DryInfo "Wuerde den Server auf http://127.0.0.1:8765 starten und den Browser oeffnen."
+    Write-DryInfo "Wuerde den Server auf http://127.0.0.1:8765 starten (STEUERAUSZUG_LAUNCHER=1) und den Browser oeffnen."
+    Write-DryInfo "Endet der Server mit Exit-Code 3 (Neustart nach Update), wuerde das Skript die Abhaengigkeiten erneut installieren und den Server neu starten (ohne den Browser erneut zu oeffnen)."
     Write-DryInfo "Trockenlauf beendet."
     exit 0
 }
@@ -311,28 +312,49 @@ if (Test-PortInUse) {
     exit 1
 }
 
-Write-Info "Starte Server ..."
-$proc = Start-Process -FilePath $VenvPython -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', "$Port") -NoNewWindow -PassThru
+$env:STEUERAUSZUG_LAUNCHER = "1"
+$first = $true
+while ($true) {
+    Write-Info "Starte Server ..."
+    $proc = Start-Process -FilePath $VenvPython -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', "$Port") -NoNewWindow -PassThru
 
-$ready = $false
-for ($i = 0; $i -lt 40; $i++) {
-    if ($proc.HasExited) { break }
-    if (Test-IsOurApp (Get-AppStatus)) { $ready = $true; break }
-    Start-Sleep -Milliseconds 500
-}
+    $ready = $false
+    for ($i = 0; $i -lt 40; $i++) {
+        if ($proc.HasExited) { break }
+        if (Test-IsOurApp (Get-AppStatus)) { $ready = $true; break }
+        Start-Sleep -Milliseconds 500
+    }
 
-if ($ready) {
-    Write-Host "Server laeuft auf $BaseUrl (Strg+C zum Beenden)"
-    Start-Process $BaseUrl
-} elseif (-not $proc.HasExited) {
-    Write-Host "Der Server antwortet nach 20 s noch nicht. Der Browser wird nicht geoeffnet; bitte die Ausgabe oben beachten."
-}
+    if ($ready) {
+        if ($first) {
+            Write-Host "Server laeuft auf $BaseUrl (Strg+C zum Beenden)"
+            Start-Process $BaseUrl
+        } else {
+            Write-Host "Server laeuft wieder auf $BaseUrl (die Seite laedt sich selbst neu)."
+        }
+    } elseif (-not $proc.HasExited) {
+        Write-Host "Der Server antwortet nach 20 s noch nicht. Der Browser wird nicht geoeffnet; bitte die Ausgabe oben beachten."
+    }
 
-$proc.WaitForExit()
-$code = $proc.ExitCode
-# 0 = normal beendet; -1073741510 = Beenden per Strg+C
-if ($code -ne 0 -and $code -ne -1073741510) {
-    Write-Host "Der Server wurde unerwartet beendet (Exit-Code $code). Bitte die Meldungen oben beachten."
-    exit $code
+    $proc.WaitForExit()
+    $code = $proc.ExitCode
+
+    # 3 = Neustart nach Update (Anforderung aus der App)
+    if ($code -eq 3) {
+        Write-Host "Neustart nach Update ..."
+        Write-Info "Installiere Abhaengigkeiten ..."
+        & $VenvPython -m pip install --quiet -r requirements.txt
+        if ($LASTEXITCODE -ne 0) {
+            Stop-Script "Die Abhaengigkeiten konnten nicht installiert werden. Der Server wird nicht neu gestartet. Bitte start.bat erneut starten."
+        }
+        $first = $false
+        continue
+    }
+
+    # 0 = normal beendet; -1073741510 = Beenden per Strg+C
+    if ($code -ne 0 -and $code -ne -1073741510) {
+        Write-Host "Der Server wurde unerwartet beendet (Exit-Code $code). Bitte die Meldungen oben beachten."
+        exit $code
+    }
+    exit 0
 }
-exit 0
