@@ -231,7 +231,9 @@ def test_apply_installs_pending_version(net):
     assert ok, job.lines
     data = paths.data_dir()
     exe = versions.exe_in(versions.version_dir(data, "1.5.1"))
-    assert exe.is_file() and exe.stat().st_mode & 0o111
+    assert exe.is_file()
+    if os.name != "nt":  # Windows kennt kein Ausführungsbit
+        assert exe.stat().st_mode & 0o111
     assert versions.read_state(data)["pending"] == "1.5.1"
     assert not (data / "updates" / "download.tmp").exists()
     assert not list((data / "versions").glob("*.partial"))
