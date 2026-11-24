@@ -41,3 +41,23 @@ def git_usable(
     if (platform or sys.platform) == "darwin" and path == "/usr/bin/git":
         return run_capture(["xcode-select", "-p"]) == 0
     return True
+
+
+def open_folder(path: str | Path) -> None:
+    """Öffnet einen Ordner im Datei-Manager (Explorer, Finder, xdg-open)."""
+    import subprocess
+    import sys
+    target = str(path)
+    if is_windows():
+        os.startfile(target)  # type: ignore[attr-defined]  # noqa: S606
+        return
+    cmd = ["open", target] if sys.platform == "darwin" else ["xdg-open", target]
+    env = dict(os.environ)
+    if getattr(sys, "frozen", False):
+        # PyInstaller (Linux) ersetzt LD_LIBRARY_PATH; Fremdprogramme brauchen das ursprüngliche
+        orig = env.pop("LD_LIBRARY_PATH_ORIG", None)
+        env.pop("LD_LIBRARY_PATH", None)
+        if orig:
+            env["LD_LIBRARY_PATH"] = orig
+    subprocess.Popen(cmd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)

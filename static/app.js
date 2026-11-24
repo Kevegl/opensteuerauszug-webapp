@@ -27,20 +27,26 @@ async function loadStatus() {
   const b = $("#status");
   b.textContent = st.ok ? "Tool bereit" : "Tool: " + st.message;
   b.className = "badge " + (st.ok ? "ok" : "err");
-  const SRC = { settings: "Einstellungen", env: "Umgebungsvariable", home: "Benutzerordner", app: "App-eigener Ordner" };
+  const SRC = { settings: "Einstellungen", env: "Umgebungsvariable", home: "Benutzerordner", app: "App-eigener Ordner", bundled: "mitgeliefert" };
   const KIND = { git: "Git", zip: "ZIP", unknown: "unbekannt" };
-  $("#tool-info").textContent = `Ordner: ${st.tool_repo} (${SRC[st.tool_source] || st.tool_source})` +
+  const bundled = !!st.bundled;
+  $("#tool-info").textContent = bundled
+    ? (st.ok ? `Tool: ${st.bundled_text || "mitgeliefert"}` : `Tool: ${st.message}`)
+    : `Ordner: ${st.tool_repo} (${SRC[st.tool_source] || st.tool_source})` +
     (st.ok ? ` | Installationsart: ${KIND[st.install_kind] || "-"} | Stand: ${st.version || "unbekannt"}` : " | nicht installiert oder nicht funktionsfähig");
-  $("#btn-tool-install").hidden = st.ok;
-  $("#btn-tool-update").hidden = !st.ok;
+  $("#btn-tool-install").hidden = st.ok || bundled;
+  $("#btn-tool-update").hidden = !st.ok || bundled;
+  $("#tool-repo-label").hidden = bundled;
   const upd = $("#btn-tool-update");
   upd.textContent = st.version_state === "newer" ? "Zurück zur getesteten Version"
     : st.version_state === "tested" ? "Tool prüfen" : "Tool aktualisieren";
   upd.dataset.state = st.version_state || "unknown";
   upd.dataset.tested = st.tested_commit || "";
-  $("#btn-tool-latest").hidden = !st.ok;
+  $("#btn-tool-latest").hidden = !st.ok || bundled;
   const vi = $("#tool-version");
-  vi.hidden = !st.tested_commit;
+  vi.hidden = !st.tested_commit || bundled;
+  $("#data-info").textContent = "Datenordner: " + (st.data_dir || "-") +
+    (st.app_version_number ? ` | Programmversion: ${st.app_version_number}` : "");
   vi.innerHTML = st.tested_commit
     ? `Installierter Commit: <b>${esc(st.installed_commit || "unbekannt")}</b> | Getesteter Commit: <b>${esc(st.tested_commit)}</b>` +
       (st.tested_on ? ` (getestet am ${esc(st.tested_on)})` : "") +
@@ -174,8 +180,17 @@ function appMsg(text, cls) {
 function renderApp(u) {
   appState = u;
   const info = $("#app-info");
-  $("#app-nogit").hidden = u.is_git;
+  const program = u.mode === "program";
+  $("#app-program").hidden = !program;
+  $("#app-nogit").hidden = u.is_git || program;
   $("#btn-app-check").hidden = !u.is_git;
+  if (program) {
+    info.textContent = `Programmversion: ${u.version || "unbekannt"}`;
+    if (u.releases_url) $("#app-releases").href = u.releases_url;
+    $("#btn-app-apply").hidden = true; $("#btn-app-restart").hidden = true; $("#app-commits").hidden = true;
+    appMsg("");
+    return;
+  }
   if (!u.is_git) {
     info.textContent = "Update nicht verfügbar: " + (u.reason || "unbekannt");
     $("#btn-app-apply").hidden = true; $("#btn-app-restart").hidden = true; $("#app-commits").hidden = true;
@@ -255,6 +270,28 @@ $("#btn-app-apply").onclick = async () => {
   await runJob("/api/app/update/apply", {});
 };
 $("#btn-app-restart").onclick = restartApp;
+
+// ---- Ordner öffnen / App beenden ----
+async function openFolder(which) {
+  try { await api("/api/open-folder", json("POST", { which })); }
+  catch (e) { log("FEHLER: " + e.message); }
+}
+$("#btn-open-data").onclick = () => openFolder("data");
+$("#btn-open-output").onclick = () => openFolder("output");
+$("#btn-quit").onclick = async () => {
+  if (!confirm("Den Steuerauszug-Assistenten jetzt beenden? Ihre Daten bleiben gespeichert.")) return;
+  const msg = $("#quit-msg");
+  let force = false;
+  try { await api("/api/app/quit", json("POST", {})); }
+  catch (e) {
+    if (!/Job/.test(e.message) || !confirm(e.message + "\nTrotzdem beenden?")) { log("FEHLER: " + e.message); return; }
+    force = true;
+    try { await api("/api/app/quit", json("POST", { force })); } catch (e2) { log("FEHLER: " + e2.message); return; }
+  }
+  msg.hidden = false;
+  msg.textContent = "Der Steuerauszug-Assistent wurde beendet. Sie können dieses Fenster schließen. Zum erneuten Starten das Programm öffnen.";
+  document.querySelectorAll("button").forEach((b) => { b.disabled = true; });
+};
 
 (async () => {
   await loadStatus().catch((e) => log(e.message));

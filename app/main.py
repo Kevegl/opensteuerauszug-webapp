@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import threading
+from contextlib import asynccontextmanager
 from xml.parsers import expat
 from pathlib import Path, PurePosixPath
 
@@ -10,20 +12,37 @@ from fastapi import Body, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import kursliste, runner, selfupdate, settings as st, toolsetup, workflow
+from . import kursliste, paths, program_update, runner, selfupdate, settings as st, toolsetup, workflow
 from .jobs import JobManager
+from .platform_utils import open_folder as _open_folder
 
-STATIC_DIR = st.BASE_DIR / "static"
-PORT = 8765
+STATIC_DIR = paths.STATIC_DIR
+PORT = paths.port()
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 CHUNK_SIZE = 1024 * 1024
 ALLOWED_ROOTS = {"FlexQueryResponse", "FlexStatements"}
 
-app = FastAPI(title="Steuerauszug-Assistent")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Datenordner anlegen und alte Daten aus dem Projektordner einmalig kopieren (auch bei uvicorn app.main:app)
+    paths.startup(log=lambda m: print(m, flush=True))
+    yield
+
+
+app = FastAPI(title="Steuerauszug-Assistent", lifespan=lifespan)
 jobs = JobManager()
 # Injizierbar, damit Tests den Prozess nicht beenden.
 exit_process = os._exit
 RESTART_DELAY = 0.5
+# Beenden über /api/app/quit: Im Startprogramm (launcher.py) wird quit_via_event gesetzt, dann beendet der
+# Launcher die App sauber, sobald quit_event gesetzt ist. Sonst (uvicorn direkt) endet der Prozess mit Code 0.
+quit_event = threading.Event()
+quit_via_event = False
+# Injizierbar, damit Tests keinen Ordner öffnen.
+open_folder = _open_folder
+FOLDER_TARGETS = ("data", "output")
 
 
 def _settings() -> dict:
@@ -51,25 +70,76 @@ def api_status():
     info.update(toolsetup.describe(s["tool_repo"], s.get("tool_repo_source", "settings")))
     info["app"] = "steuerauszug-assistent"
     info["app_version"] = selfupdate.app_version()
+    info["app_version_number"] = paths.version()
+    info["program_mode"] = paths.is_frozen()
+    info["bundled"] = runner.bundled_mode()
+    info["data_dir"] = str(paths.data_dir())
+    info["output_dir"] = str(st.OUTPUT_DIR)
     info["default_year"] = dt.date.today().year - 1
     running = jobs.running()
     info["running_job"] = running.id if running else None
     return info
 
 
+@app.get("/api/health")
+def api_health():
+    """Leichte Prüfung, ob diese App auf dem Port läuft (ohne Tool-Prüfung)."""
+    return {"ok": True, "app": "steuerauszug-assistent", "version": paths.version()}
+
+
 @app.get("/api/app/update")
 def api_app_update_status():
-    return selfupdate.status()
+    if paths.is_frozen():
+        return program_update.status()
+    return {**selfupdate.status(), "mode": "git", "version_number": paths.version()}
 
 
 @app.post("/api/app/update/check")
 def api_app_update_check():
+    if paths.is_frozen():
+        try:
+            return program_update.check()
+        except program_update.NotSupported as exc:
+            raise HTTPException(409, str(exc))
     return selfupdate.check()
 
 
 @app.post("/api/app/update/apply")
 def api_app_update_apply():
+    if paths.is_frozen():
+        try:
+            return _start("app-update", "Programm aktualisieren", program_update.job_apply())
+        except program_update.NotSupported as exc:
+            raise HTTPException(409, str(exc))
     return _start("app-update", "App aktualisieren", selfupdate.job_apply())
+
+
+@app.post("/api/app/quit")
+def api_app_quit(body: dict = Body(default={})):
+    """Beendet die App sauber. Läuft ein Job, nur mit {"force": true}."""
+    if jobs.running() and not body.get("force"):
+        raise HTTPException(409, "Es läuft ein Job. Bitte warten, bis er beendet ist.")
+    quit_event.set()
+    if not quit_via_event:
+        timer = threading.Timer(RESTART_DELAY, lambda: exit_process(0))
+        timer.daemon = True
+        timer.start()
+    return {"quitting": True}
+
+
+@app.post("/api/open-folder")
+def api_open_folder(body: dict = Body(default={})):
+    """Öffnet den Datenordner oder den Ausgabeordner im Datei-Manager (nur diese festen Ziele)."""
+    which = body.get("which")
+    if which not in FOLDER_TARGETS:
+        raise HTTPException(400, 'Ungültiges Ziel: erlaubt sind "data" und "output".')
+    target = paths.data_dir() if which == "data" else st.OUTPUT_DIR
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        open_folder(target)
+    except OSError as exc:
+        raise HTTPException(500, f"Ordner konnte nicht geöffnet werden: {exc}")
+    return {"opened": str(target)}
 
 
 @app.post("/api/app/restart")
@@ -82,8 +152,15 @@ def api_app_restart():
     return {"restarting": True}
 
 
+def _refuse_if_bundled() -> None:
+    if runner.bundled_mode():
+        raise HTTPException(409, "Das Tool opensteuerauszug ist in diesem Programm mitgeliefert und wird mit dem "
+                                 "Programm aktualisiert. Installieren oder Aktualisieren ist hier nicht nötig.")
+
+
 @app.post("/api/tool/install")
 def api_tool_install(body: dict = Body(default={})):
+    _refuse_if_bundled()
     s = _settings()
     if not body.get("force") and runner.check_tool(s["tool_repo"])["ok"]:
         raise HTTPException(409, "Das Tool ist bereits installiert und funktionsfähig.")
@@ -94,6 +171,7 @@ def api_tool_install(body: dict = Body(default={})):
 def api_tool_update(body: dict = Body(default={})):
     """target: "tested" (Standard: auf die getestete Version) oder "latest" (main, ungetestet).
     force: erlaubt das Zurückstufen, wenn der installierte Stand neuer als die getestete Version ist."""
+    _refuse_if_bundled()
     s = _settings()
     target = body.get("target") or "tested"
     if target not in ("tested", "latest"):
@@ -119,7 +197,8 @@ def api_put_settings(patch: dict = Body(...)):
 @app.get("/api/kursliste")
 def api_kursliste():
     s = _settings()
-    directory = kursliste.resolve_dir(s["tool_repo"]) if runner.tool_python(s["tool_repo"]).exists() else None
+    directory = (kursliste.resolve_dir(s["tool_repo"])
+                 if runner.bundled_mode() or runner.tool_python(s["tool_repo"]).exists() else None)
     return {"directory": str(directory) if directory else None,
             "years": kursliste.list_status(directory)}
 

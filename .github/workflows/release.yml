@@ -1,0 +1,108 @@
+# Auslöser: ein auf GitHub veröffentlichtes Release ODER ein gepushter Tag v1.5.0. Der Tag muss zu app/VERSION passen.
+# Bei einem gepushten Tag ohne Release legt dieser Workflow das Release selbst an (Notizen aus dem passenden
+# Abschnitt von CHANGELOG.md). Es entstehen automatisch als Release-Dateien:
+#   - Steuerauszug-Assistent-<version>-windows-x64.zip (.exe)
+#   - Steuerauszug-Assistent-<version>-macos-arm64.zip (.app)
+# Von Hand gestartet (workflow_dispatch) wird nur gebaut und getestet, nichts veröffentlicht (Artefakt zum Download).
+name: Release
+
+on:
+  release:
+    types: [published]
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# Release in der GitHub-Oberfläche + neuer Tag lösen beide Ereignisse aus -> nacheinander statt gleichzeitig
+concurrency:
+  group: release-${{ github.event.release.tag_name || github.ref_name }}
+
+permissions:
+  contents: write    # Release anlegen und Dateien anhängen
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+      publish: ${{ steps.v.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        name: Version prüfen
+        env:
+          EVENT: ${{ github.event_name }}
+          TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref_name }}
+        run: |
+          VERSION=$(tr -d '[:space:]' < app/VERSION)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT" = "workflow_dispatch" ]; then echo "publish=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+          if [ "$TAG" != "v$VERSION" ]; then
+            echo "::error::Tag $TAG passt nicht zu app/VERSION ($VERSION) – erwartet v$VERSION"
+            exit 1
+          fi
+      - name: Release anlegen (bei gepushtem Tag)
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG existiert bereits."
+            exit 0
+          fi
+          # Abschnitt "## [vX.Y.Z] ..." bis zum nächsten "## [" (ohne Überschriftszeile und Link-Zeilen am Dateiende)
+          awk -v tag="$TAG" '
+            index($0, "## [" tag "]") == 1 { grab = 1; next }
+            grab && /^## \[/ { exit }
+            grab && /^\[v[0-9][^]]*\]: / { next }
+            grab { print }
+          ' CHANGELOG.md > notes.md
+          HEADING=$(grep -m1 -F "## [$TAG]" CHANGELOG.md || true)
+          SUFFIX=$(printf '%s' "$HEADING" | awk -F ' – ' 'NF >= 3 { print $3 }')
+          if [ -n "$SUFFIX" ]; then TITLE="$TAG – $SUFFIX"; else TITLE="$TAG"; fi
+          if [ ! -s notes.md ]; then
+            echo "::warning::Kein Abschnitt für $TAG in CHANGELOG.md gefunden"
+            echo "Siehe CHANGELOG.md" > notes.md
+          fi
+          gh release create "$TAG" --verify-tag --title "$TITLE" --notes-file notes.md
+
+  apps:
+    needs: verify
+    name: Programm (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Abhängigkeiten installieren (App, PyInstaller, Tool im gepinnten Stand)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r packaging/requirements-build.txt
+      - id: build
+        name: Bauen
+        run: python packaging/build_app.py
+      - name: Kurztest der gebauten Version
+        run: python tests/smoke_app.py -- "${{ steps.build.outputs.exe }}"
+      - name: An das Release anhängen
+        if: needs.verify.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ needs.verify.outputs.tag }}" "${{ steps.build.outputs.zip }}" --clobber
+      - name: Als Artefakt ablegen (Testlauf)
+        if: needs.verify.outputs.publish != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Steuerauszug-Assistent-${{ runner.os }}
+          path: ${{ steps.build.outputs.zip }}

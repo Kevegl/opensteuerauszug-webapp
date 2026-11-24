@@ -1,4 +1,4 @@
-"""Einstellungen (settings.json im Projektordner)."""
+"""Einstellungen (settings.json im Datenordner, siehe paths.py)."""
 from __future__ import annotations
 
 import json
@@ -7,12 +7,14 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from . import paths, runner
 from .platform_utils import venv_python
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-SETTINGS_FILE = BASE_DIR / "settings.json"
-UPLOAD_DIR = BASE_DIR / "work" / "uploads"
-OUTPUT_DIR = BASE_DIR / "output"
+BASE_DIR = paths.BASE_DIR
+DATA_DIR = paths.data_dir()
+SETTINGS_FILE = DATA_DIR / "settings.json"
+UPLOAD_DIR = DATA_DIR / "work" / "uploads"
+OUTPUT_DIR = DATA_DIR / "output"
 APP_TOOL_DIR = BASE_DIR / "tool" / "opensteuerauszug"
 
 DEFAULTS: dict[str, Any] = {
@@ -33,9 +35,12 @@ def home_tool_dir() -> Path:
 def resolve_tool_repo(explicit: str | None) -> tuple[str, str]:
     """Wählt den Tool-Ordner. Rückgabe: (Pfad, Herkunft) mit Herkunft settings | env | home | app.
 
-    Reihenfolge: settings.json, Umgebungsvariable, bestehende Installation unter
+    Im Programm mit mitgeliefertem Tool gibt es keine Tool-venv: der Ordner dient nur als Arbeitsordner
+    (Herkunft "bundled"). Sonst Reihenfolge: settings.json, Umgebungsvariable, bestehende Installation unter
     ~/opensteuerauszug (Windows: %USERPROFILE%) (nur mit vorhandenem .venv), sonst app-eigener Ordner.
     """
+    if runner.bundled_mode():
+        return str(DATA_DIR / "tool"), "bundled"
     if explicit and explicit.strip():
         return explicit.strip(), "settings"
     env = os.environ.get("OPENSTEUER_TOOL_REPO")
@@ -82,6 +87,7 @@ def save_settings(settings: dict[str, Any], path: Path | None = None) -> None:
         clean["tool_repo"] = ""
     clean["flex_queries"] = _clean_queries(clean["flex_queries"])
     with _lock:
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(clean, indent=2, ensure_ascii=False), encoding="utf-8")
 
 

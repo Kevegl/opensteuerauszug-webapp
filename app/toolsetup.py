@@ -20,14 +20,14 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Callable
 
-from . import runner
+from . import paths, runner
 from .platform_utils import git_usable
 
 Log = Callable[[str], None]
 
 REPO_URL = "https://github.com/vroonhof/opensteuerauszug.git"
 DEFAULT_SLUG = "vroonhof/opensteuerauszug"
-PIN_FILE = Path(__file__).with_name("tool_version.json")
+PIN_FILE = paths.APP_DIR / "tool_version.json"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 MARKER_NAME = ".steuerauszug-assistent.json"
 MAX_ZIP_BYTES = 300 * 1024 * 1024
@@ -266,7 +266,28 @@ def installed_version(repo: str | Path, deps: Deps | None = None) -> str | None:
     return ver
 
 
+def describe_bundled(repo: str | Path, deps: Deps | None = None) -> dict:
+    """Tool-Stand im Programm: der Build installiert genau den Commit aus tool_version.json."""
+    deps = deps or Deps()
+    try:
+        pin = _pin(deps)
+    except SetupError:
+        pin = {}
+    commit = pin.get("commit")
+    short = _short(commit)
+    text = f"mitgeliefert, Version {short}" if short else "mitgeliefert"
+    return {
+        "tool_repo": str(repo), "tool_source": "bundled", "install_kind": "bundled",
+        "version": short, "bundled": True, "bundled_text": text,
+        "installed_commit": short, "installed_commit_full": commit,
+        "tested_commit": short, "tested_commit_full": commit, "tested_on": pin.get("tested_on"),
+        "version_state": "tested", "version_state_text": text,
+    }
+
+
 def describe(repo: str | Path, source: str, deps: Deps | None = None) -> dict:
+    if runner.bundled_mode():
+        return describe_bundled(repo, deps)
     return {
         "tool_repo": str(repo),
         "tool_source": source,  # settings | env | home | app

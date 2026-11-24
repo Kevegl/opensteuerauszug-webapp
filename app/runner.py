@@ -1,16 +1,24 @@
 """Befehlsaufbau und Subprozess-Aufrufe für das Tool opensteuerauszug.
 
-Das Tool wird nie importiert, nur über das Python seines eigenen venv gestartet.
+Das Tool wird nie in die App importiert, sondern immer als Subprozess gestartet:
+  * venv-Modus (Python-Variante): über das Python seiner eigenen Tool-venv,
+  * Bundled-Modus (gebautes Programm): über das Programm selbst (``--run-tool <modul>``, siehe toolrun.py).
+Die Befehlspräfixe liefern ausschließlich ``tool_prefix`` und ``tool_dir_prefix``.
 """
 from __future__ import annotations
 
+import importlib.util
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Callable, Iterable
 
+from . import paths, toolrun
 from .platform_utils import venv_python, venv_python_hint
+
+BUNDLED_ENV = "STEUERAUSZUG_BUNDLED_TOOL"
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 ACCOUNT_RE = re.compile(r"<AccountInformation\b[^>]*?\baccountId=\"([^\"]+)\"")
@@ -19,6 +27,36 @@ SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 def tool_python(repo: str | Path) -> Path:
     return venv_python(Path(repo) / ".venv")
+
+
+def bundled_mode() -> bool:
+    """True, wenn das Tool im Programm mitgeliefert ist (gebaut oder per STEUERAUSZUG_BUNDLED_TOOL=1)."""
+    return paths.is_frozen() or os.environ.get(BUNDLED_ENV, "").strip() == "1"
+
+
+def _self_prefix() -> list[str]:
+    """Befehl, der das Programm selbst startet (vor den Tool-Optionen)."""
+    if paths.is_frozen():
+        return [sys.executable]
+    # Entwicklung mit erzwungenem Bundled-Modus: die Startdatei des Projekts mit dem aktuellen Python
+    return [sys.executable, str(paths.BASE_DIR / "app" / "launcher.py")]
+
+
+def tool_prefix(repo: str | Path, module: str) -> list[str]:
+    """Befehlspräfix zum Ausführen eines Tool-Moduls (wie ``python -m <modul>``)."""
+    if bundled_mode():
+        if module not in toolrun.ALLOWED_MODULES:
+            raise ValueError(f"Tool-Modul nicht erlaubt: {module}")
+        return [*_self_prefix(), toolrun.RUN_TOOL_FLAG, module]
+    return [str(tool_python(repo)), "-m", module]
+
+
+def tool_dir_prefix(repo: str | Path) -> list[str]:
+    """Befehl, der den Kursliste-Ordner des Tools auf stdout ausgibt."""
+    if bundled_mode():
+        return [*_self_prefix(), toolrun.KURSLISTE_DIR_FLAG]
+    code = "from opensteuerauszug.config.paths import resolve_kursliste_dir as r; print(r())"
+    return [str(tool_python(repo)), "-c", code]
 
 
 def build_steuerauszug_cmd(
@@ -33,7 +71,7 @@ def build_steuerauszug_cmd(
     payment_reconciliation: bool | None = None,
 ) -> list[str]:
     cmd = [
-        str(tool_python(repo)), "-m", "opensteuerauszug.steuerauszug",
+        *tool_prefix(repo, toolrun.STEUERAUSZUG_MODULE),
         str(xml_in), "--importer", "ibkr", "--tax-year", str(int(year)),
         "-o", str(pdf_out),
     ]
@@ -55,7 +93,7 @@ def build_steuerauszug_cmd(
 def build_kursliste_download_cmd(
     repo: str | Path, year: int, destination: str | Path | None = None, convert: bool = True
 ) -> list[str]:
-    cmd = [str(tool_python(repo)), "-m", "opensteuerauszug.kursliste", "download", "--year", str(int(year))]
+    cmd = [*tool_prefix(repo, toolrun.KURSLISTE_MODULE), "download", "--year", str(int(year))]
     if destination:
         cmd += ["--destination", str(destination)]
     cmd += ["--convert" if convert else "--no-convert"]
@@ -63,11 +101,11 @@ def build_kursliste_download_cmd(
 
 
 def build_kursliste_dir_cmd(repo: str | Path) -> list[str]:
-    code = "from opensteuerauszug.config.paths import resolve_kursliste_dir as r; print(r())"
-    return [str(tool_python(repo)), "-c", code]
+    return tool_dir_prefix(repo)
 
 
 def build_check_cmd(repo: str | Path) -> list[str]:
+    """Nur im venv-Modus; im Bundled-Modus prüft check_tool das Modul im selben Prozess."""
     return [str(tool_python(repo)), "-c", "import opensteuerauszug; print('ok')"]
 
 
@@ -112,6 +150,16 @@ def tool_env() -> dict[str, str]:
     return env
 
 
+def _workdir(cwd: str | Path) -> str:
+    """Im Bundled-Modus ist der Tool-Ordner nur ein Arbeitsordner und wird bei Bedarf angelegt."""
+    if bundled_mode():
+        try:
+            Path(cwd).mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+    return str(cwd)
+
+
 def run_streaming(
     cmd: Iterable[str],
     cwd: str | Path,
@@ -128,7 +176,7 @@ def run_streaming(
 
     try:
         proc = subprocess.Popen(
-            list(cmd), cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            list(cmd), cwd=_workdir(cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             env=tool_env(), text=True, encoding="utf-8", errors="replace",
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
@@ -146,7 +194,7 @@ def run_streaming(
 def run_capture(cmd: Iterable[str], cwd: str | Path, timeout: int = 60) -> tuple[int, str]:
     try:
         res = subprocess.run(
-            list(cmd), cwd=str(cwd), capture_output=True, text=True, encoding="utf-8",
+            list(cmd), cwd=_workdir(cwd), capture_output=True, text=True, encoding="utf-8",
             errors="replace", timeout=timeout, env=tool_env(),
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
@@ -155,8 +203,33 @@ def run_capture(cmd: Iterable[str], cwd: str | Path, timeout: int = 60) -> tuple
     return res.returncode, (res.stdout or "") + (res.stderr or "")
 
 
+def bundled_module_importable() -> bool:
+    """True, wenn das Tool im laufenden Programm vorhanden ist (ohne es zu importieren)."""
+    try:
+        return importlib.util.find_spec(toolrun.STEUERAUSZUG_MODULE) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def check_tool_bundled(repo: str | Path) -> dict:
+    repo = Path(repo)
+    ok = bundled_module_importable()
+    info = {
+        "repo": str(repo), "repo_exists": True, "python": sys.executable, "python_exists": True,
+        "importable": ok, "bundled": True,
+        "config_exists": (repo / "config.toml").exists(),
+        "identifiers_exist": (repo / "data" / "security_identifiers.csv").exists(),
+        "message": "Bereit (mitgeliefert)." if ok else
+        "Das mitgelieferte Tool opensteuerauszug fehlt im Programm. Bitte das Programm neu herunterladen.",
+    }
+    info["ok"] = ok
+    return info
+
+
 def check_tool(repo: str | Path) -> dict:
     """Status des Tool-Setups."""
+    if bundled_mode():
+        return check_tool_bundled(repo)
     repo = Path(repo)
     py = tool_python(repo)
     info = {

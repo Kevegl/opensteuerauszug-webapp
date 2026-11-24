@@ -585,7 +585,7 @@ def exits(monkeypatch):
 def test_app_update_status_endpoint(env, monkeypatch):
     monkeypatch.setattr(selfupdate, "status", lambda deps=None: {"is_git": False, "reason": "kein Git-Klon"})
     body = env["client"].get("/api/app/update").json()
-    assert body == {"is_git": False, "reason": "kein Git-Klon"}
+    assert body == {"is_git": False, "reason": "kein Git-Klon", "mode": "git", "version_number": "1.5.0"}
 
 
 def test_app_update_check_endpoint(env, monkeypatch):

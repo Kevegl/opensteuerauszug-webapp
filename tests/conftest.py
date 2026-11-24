@@ -1,9 +1,45 @@
+import atexit
+import os
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
-import pytest
+# Vor jedem Import von app.*: Datenordner in ein Temp-Verzeichnis legen, damit Tests nie das echte
+# Benutzerprofil (%LOCALAPPDATA%, ~/Library/..., ~/.local/share) berühren.
+_SESSION_DATA = tempfile.mkdtemp(prefix="steuerauszug-tests-")
+atexit.register(shutil.rmtree, _SESSION_DATA, ignore_errors=True)
+os.environ["STEUERAUSZUG_DATA_DIR"] = str(Path(_SESSION_DATA) / "data")
+os.environ.pop("STEUERAUSZUG_BUNDLED_TOOL", None)
+os.environ.pop("STEUERAUSZUG_PORT", None)
+
+import pytest  # noqa: E402
+
+# Kurztest des gebauten Programms ist ein eigenes Skript, kein pytest-Test
+collect_ignore_glob = ["smoke_*.py"]
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from app import paths, settings as _st  # noqa: E402
+
+assert Path(_SESSION_DATA).resolve() in _st.SETTINGS_FILE.resolve().parents, "Datenordner der Tests nicht isoliert"
+
+
+@pytest.fixture(autouse=True)
+def isolated_profile(tmp_path, monkeypatch):
+    """Jeder Test bekommt einen eigenen Datenordner; die Migration findet keinen Projektordner."""
+    data = tmp_path / "_data"
+    monkeypatch.setenv("STEUERAUSZUG_DATA_DIR", str(data))
+    monkeypatch.delenv("STEUERAUSZUG_BUNDLED_TOOL", raising=False)
+    monkeypatch.setattr(paths, "LEGACY_DIR", None)
+    monkeypatch.setattr(_st, "DATA_DIR", data)
+    monkeypatch.setattr(_st, "SETTINGS_FILE", data / "settings.json")
+    monkeypatch.setattr(_st, "UPLOAD_DIR", data / "work" / "uploads")
+    monkeypatch.setattr(_st, "OUTPUT_DIR", data / "output")
+    # Nie ein echtes Programm/Explorer öffnen
+    from app import main
+    monkeypatch.setattr(main, "open_folder", lambda p: (_ for _ in ()).throw(AssertionError("open_folder ungemockt")))
+    yield data
 
 
 @pytest.fixture

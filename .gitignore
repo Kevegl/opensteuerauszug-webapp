@@ -13,3 +13,7 @@ __pycache__/
 *.bak
 *.tmp
 tool/
+
+# Build der Programmversion (packaging/build_app.py)
+build/
+dist/

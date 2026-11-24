@@ -1,0 +1,6 @@
+# Abhaengigkeiten nur zum Bauen der eigenstaendigen Programmversion (packaging/build_app.py).
+# Die App selbst (requirements.txt) braucht opensteuerauszug nicht.
+pyinstaller==6.22.3
+# Das Tool wird mit den Abhaengigkeiten ins Programm gebuendelt. Der Commit steht in app/tool_version.json
+# (Pin an einer Stelle); build_app.py prueft, dass diese Zeile dazu passt.
+opensteuerauszug @ git+https://github.com/vroonhof/opensteuerauszug.git@4633aab493e90a0f13e6701e8aa2d85cf77e4bab

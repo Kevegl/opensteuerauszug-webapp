@@ -29,12 +29,26 @@
       <p class="hint">Update-Funktion nur bei Installation per <code>git clone</code> verfügbar:</p>
       <pre class="code">git clone https://github.com/kevegl/opensteuerauszug-webapp.git</pre>
     </div>
+    <div id="app-program" hidden>
+      <p class="hint">Neue Versionen des Programms gibt es auf der Release-Seite:
+        <a id="app-releases" href="https://github.com/Kevegl/opensteuerauszug-webapp/releases/latest" target="_blank" rel="noopener">github.com/Kevegl/opensteuerauszug-webapp/releases/latest</a></p>
+    </div>
     <ul id="app-commits" class="commits" hidden></ul>
     <div class="row">
       <button id="btn-app-check" hidden>Nach Updates suchen</button>
       <button id="btn-app-apply" class="primary" hidden>Update installieren</button>
       <button id="btn-app-restart" class="primary" hidden>Jetzt neu starten</button>
     </div>
+  </section>
+
+  <section class="card" id="sec-data">
+    <h2>Daten</h2>
+    <p class="hint" id="data-info">Datenordner: -</p>
+    <p class="hint">Einstellungen, hochgeladene Dateien und Ergebnisse liegen in diesem Ordner.</p>
+    <div class="row"><button id="btn-open-data">Ordner öffnen</button>
+      <button id="btn-open-output">Ergebnisse öffnen</button>
+      <button id="btn-quit" class="subtle">App beenden</button></div>
+    <p class="hint" id="quit-msg" hidden></p>
   </section>
 
   <section class="card" id="sec-year">
@@ -67,7 +81,7 @@
     <p class="hint">Gespeichert: <span id="token-masked">-</span> <button id="btn-clear-token" class="small">Token löschen</button></p>
     <table id="q-table"><thead><tr><th>Bezeichnung</th><th>Query-ID</th><th></th></tr></thead><tbody></tbody></table>
     <div class="row"><button id="btn-add-q" class="small">+ Query</button><button id="btn-save-settings">Speichern</button></div>
-    <label>Tool-Ordner <input id="tool-repo" type="text"></label>
+    <label id="tool-repo-label">Tool-Ordner <input id="tool-repo" type="text"></label>
   </section>
 
   <section class="card">

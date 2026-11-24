@@ -1,0 +1,46 @@
+Steuerauszug-Assistent
+======================
+
+Starten:  Steuerauszug-Assistent.exe doppelklicken. Der Browser öffnet sich mit http://127.0.0.1:8765
+          Beim ersten Start warnt Windows ("Der Computer wurde durch Windows geschützt"), weil das
+          Programm nicht kostenpflichtig signiert ist: "Weitere Informationen" -> "Trotzdem ausführen".
+          macOS: Rechtsklick auf die App -> "Öffnen" -> "Öffnen". Oder Systemeinstellungen ->
+          "Datenschutz & Sicherheit" -> "Dennoch öffnen".
+Läuft es? Solange der Assistent läuft, ist das Fenster "Steuerauszug-Assistent" in der Taskleiste.
+Beenden:  Im Fenster "Steuerauszug-Assistent" auf "Beenden" klicken (oder im Browser: "App beenden").
+Daten:    Windows: %LOCALAPPDATA%\Steuerauszug-Assistent
+          macOS:   ~/Library/Application Support/Steuerauszug-Assistent
+          Linux:   ~/.local/share/steuerauszug-assistent
+          (Einstellungen, hochgeladene Dateien, Ergebnisse; bleiben bei Updates erhalten, nicht löschen.
+          Im Assistenten: "Ordner öffnen".)
+Updates:  Neue Versionen gibt es auf https://github.com/Kevegl/opensteuerauszug-webapp/releases/latest
+          Der Programmordner hier kann jederzeit durch einen neueren ersetzt werden.
+
+Das Tool opensteuerauszug ist im Programm enthalten. Der Assistent läuft nur auf diesem Computer und ist
+im Netzwerk nicht erreichbar. Hinweis: Die erzeugten Steuerauszüge sind nicht offiziell geprüft; bitte
+gegen das Activity Statement von Interactive Brokers kontrollieren.
+Mehr: https://github.com/Kevegl/opensteuerauszug-webapp
+
+
+Tax statement assistant
+=======================
+
+Start:    Double-click Steuerauszug-Assistent.exe. Your browser opens http://127.0.0.1:8765
+          On first start Windows warns ("Windows protected your PC") because the program is not
+          commercially signed: "More info" -> "Run anyway".
+          macOS: right-click the app -> "Open" -> "Open". Or System Settings -> "Privacy & Security"
+          -> "Open Anyway".
+Running?  While the assistant runs, the "Steuerauszug-Assistent" window is in the taskbar.
+Quit:     Click "Beenden" in the "Steuerauszug-Assistent" window (or in the browser: "App beenden").
+Data:     Windows: %LOCALAPPDATA%\Steuerauszug-Assistent
+          macOS:   ~/Library/Application Support/Steuerauszug-Assistent
+          Linux:   ~/.local/share/steuerauszug-assistent
+          (settings, uploaded files, results; kept across updates, do not delete. In the assistant:
+          "Ordner öffnen".)
+Updates:  New versions: https://github.com/Kevegl/opensteuerauszug-webapp/releases/latest
+          You can replace this program folder with a newer one at any time.
+
+The tool opensteuerauszug is included in the program. The assistant only runs on this computer and is not
+reachable from the network. Note: the generated tax statements are not officially verified; please check
+them against your Interactive Brokers activity statement.
+More: https://github.com/Kevegl/opensteuerauszug-webapp

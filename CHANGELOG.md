@@ -2,6 +2,32 @@
 
 Alle nennenswerten Änderungen am Steuerauszug-Assistenten. Versionen folgen [Semantic Versioning](https://semver.org/lang/de/).
 
+## [v1.5.0] – <offen> – Programm für Windows und Mac
+
+Datum: unveröffentlicht.
+
+### Neu
+- **Eigenständiges Programm** für Windows (x64) und macOS (Apple-Chip): herunterladen, entpacken, starten. Weder Python noch git noch eine Tool-Installation nötig.
+  - Das Tool opensteuerauszug ist samt Abhängigkeiten enthalten (genau der Commit aus `app/tool_version.json`). Die Karte „Tool“ zeigt „mitgeliefert, Version <Commit>“; Installieren und Aktualisieren des Tools sind ausgeblendet, `/api/tool/install` und `/api/tool/update` antworten mit 409.
+  - Das Programm ruft sich für das Tool selbst auf (`--run-tool <modul>`, feste Liste erlaubter Module; `--tool-kursliste-dir` statt beliebigem Code).
+  - Startprogramm `app/launcher.py`: erkennt eine bereits laufende App (öffnet nur den Browser), meldet einen fremd belegten Port, startet den Server im selben Prozess und öffnet den Browser. Kleines Statusfenster mit „Im Browser öffnen“, „Datenordner öffnen“ und „Beenden“ (ohne tkinter nur Konsole). Optionen `--no-browser` und `--no-window`. Ohne Konsole landet die Ausgabe in `<Datenordner>/logs/app.log`.
+  - Dasselbe Startprogramm läuft auch in der Python-Variante: `python -m app.launcher`.
+  - Die Karte „App-Version“ zeigt im Programm die Version und einen Link zu den Releases. Das automatische Programm-Update folgt in einer späteren Version.
+- **Gemeinsamer Datenordner** für beide Varianten: Windows `%LOCALAPPDATA%\Steuerauszug-Assistent`, macOS `~/Library/Application Support/Steuerauszug-Assistent`, Linux `~/.local/share/steuerauszug-assistent` (überschreibbar mit `STEUERAUSZUG_DATA_DIR`). Darin `settings.json`, `work/uploads`, `output`.
+  - Einmalige Migration: Liegen im Projektordner noch `settings.json`, `work/` oder `output/` und hat der Datenordner keine `settings.json`, werden sie dorthin **kopiert** (nichts verschoben, nichts überschrieben, Marker `.migriert-aus-projektordner`).
+  - Neuer Bereich „Daten“ mit dem Datenordner, „Ordner öffnen“, „Ergebnisse öffnen“ (`POST /api/open-folder`, nur die festen Ziele `data` und `output`) und „App beenden“ (`POST /api/app/quit`).
+- `/api/status` liefert zusätzlich `app_version_number` (aus der neuen Datei `app/VERSION`), `bundled`, `data_dir` und `output_dir`; neu: `/api/health`.
+
+### Für Entwickler
+- Build mit PyInstaller: `packaging/build_app.py` (Abhängigkeiten in `packaging/requirements-build.txt`), Kurztest `tests/smoke_app.py`.
+- Neuer Workflow `.github/workflows/release.yml`: prüft Tag gegen `app/VERSION`, legt bei einem gepushten Tag das Release mit den Notizen aus diesem Changelog an und hängt die ZIP-Dateien für Windows und macOS an.
+- Die Start-Skripte (`start.bat`, `start.ps1`, `start.command`) bleiben unverändert, inklusive Neustart nach einem Update (Exit-Code 3).
+- Tests nutzen immer einen temporären Datenordner und berühren das echte Benutzerprofil nie.
+- `STEUERAUSZUG_BUNDLED_TOOL=1` erzwingt den Bundled-Modus auch in der Python-Variante.
+
+### Update von v1.4.0
+Die Python-Variante aktualisiert sich wie bisher per Knopf. Beim ersten Start der neuen Version werden `settings.json`, `work/` und `output/` aus dem Projektordner in den Datenordner kopiert; die alten Dateien können danach von Hand gelöscht werden.
+
 ## [v1.4.0] – 2026-11-24 – macOS-Version und App-Update
 
 ### Neu
@@ -110,6 +136,7 @@ Doppelklick auf `start.bat`. Das venv wird angelegt, die Abhängigkeiten install
 - Der Abruf über den IBKR Flex Web Service ist noch nicht gegen die Live-API getestet.
 - Die Ergebnisse müssen gegen das IBKR Activity Statement geprüft werden.
 
+[v1.5.0]: https://github.com/Kevegl/opensteuerauszug-webapp/releases/tag/v1.5.0
 [v1.4.0]: https://github.com/Kevegl/opensteuerauszug-webapp/releases/tag/v1.4.0
 [v1.3.0]: https://github.com/Kevegl/opensteuerauszug-webapp/releases/tag/v1.3.0
 [v1.2.0]: https://github.com/Kevegl/opensteuerauszug-webapp/releases/tag/v1.2.0

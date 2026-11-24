@@ -2,11 +2,48 @@
 
 **English** | [Deutsch](README.de.md)
 
-A local web UI (German only) that automates the [opensteuerauszug](https://github.com/vroonhof/opensteuerauszug) tool: download the Kursliste (ESTV price list), fetch or upload IBKR Flex data, and generate a Swiss tax statement (Steuerauszug) as PDF + XML. The tool itself is only called as a subprocess using its own venv and is never modified.
+A local web UI (German only) that automates the [opensteuerauszug](https://github.com/vroonhof/opensteuerauszug) tool: download the Kursliste (ESTV price list), fetch or upload IBKR Flex data, and generate a Swiss tax statement (Steuerauszug) as PDF + XML. The tool itself is only called as a subprocess (Python variant: using its own venv; program: bundled) and is never modified.
 
 > **Disclaimer:** This project is a private helper tool and is not affiliated with the Swiss Federal Tax Administration (ESTV), Interactive Brokers, or the authors of opensteuerauszug. It is not tax advice. It is provided without warranty and used at your own risk: the generated tax statements (Steuerauszüge) may be incorrect or incomplete. Always check them yourself before filing, in particular against your IBKR Activity Statement and for corporate actions. Only your own declarations to the tax authority are authoritative.
 
-## Setup
+## Which variant fits?
+
+| Variant | For whom | Requirements |
+|---|---|---|
+| **Download the program** (recommended) | Windows (x64) and Macs with Apple silicon (M1 and newer) | none: Python and the opensteuerauszug tool are included |
+| **Python variant** | Developers, Intel Macs, Linux | Python 3.11 or newer (git optional) |
+
+Both variants use the same [data folder](#data-folder), so you can switch without losing data.
+
+## Program (Windows & Mac)
+
+1. On the [Releases](https://github.com/Kevegl/opensteuerauszug-webapp/releases/latest) page, download the ZIP for your system: `Steuerauszug-Assistent-<version>-windows-x64.zip` or `Steuerauszug-Assistent-<version>-macos-arm64.zip`.
+2. Unzip it (Windows: right-click, "Extract all"; Mac: double-click) and put the folder or app anywhere, e.g. into "Applications".
+3. Start: on Windows double-click `Steuerauszug-Assistent.exe`, on Mac open the `Steuerauszug-Assistent` app. A small status window appears and your browser opens `http://127.0.0.1:8765`.
+4. On first start the operating system warns because the program is not commercially signed:
+   - **Windows (SmartScreen)**: "Windows protected your PC" > **More info** > **Run anyway**.
+   - **Mac (Gatekeeper)**: right-click the app > **Open** > **Open**. Alternatively: System Settings > Privacy & Security > **Open Anyway**.
+5. Quit: "Beenden" in the status window (or close the window), or "App beenden" in the UI.
+
+The opensteuerauszug tool is included (the "Tool" card shows "mitgeliefert, Version <commit>" = bundled); installing or updating the tool is not needed. For now the program is updated by hand: download the new ZIP from the releases page and replace the old program folder. Your data stays in the data folder. An automatic program update will follow in a later version.
+
+A program without a console writes its log to `<data folder>/logs/app.log`.
+
+## Data folder
+
+Settings (including the Flex token), uploaded files and results live per user in a data folder, not in the program or project folder. In the UI ("Daten" section), "Ordner öffnen" (open folder) shows it.
+
+| System | Data folder |
+|---|---|
+| Windows | `%LOCALAPPDATA%\Steuerauszug-Assistent` |
+| macOS | `~/Library/Application Support/Steuerauszug-Assistent` |
+| Linux | `~/.local/share/steuerauszug-assistent` |
+
+The environment variable `STEUERAUSZUG_DATA_DIR` overrides the folder. It contains `settings.json`, `work/uploads/` (uploaded and Flex-fetched XML files), `output/<year>/` (results) and `logs/`.
+
+**Migration from the project folder:** If the project folder still contains `settings.json`, `work/` or `output/` of an older version and the data folder has no `settings.json` yet, they are **copied** once into the data folder on first start (not moved, nothing is overwritten; a note is logged, afterwards the file `.migriert-aus-projektordner` prevents repeating it). You can delete the old files yourself afterwards.
+
+## Python variant (developers, Intel Macs, Linux)
 
 1. Prerequisite: Python 3.11 or newer (and optionally git; without git the app downloads the tool as a ZIP). The app installs the [opensteuerauszug](https://github.com/vroonhof/opensteuerauszug) tool at the press of a button: in the "Tool" section, "Tool installieren" (Install tool) appears if the tool is missing, otherwise "Tool aktualisieren" (Update tool). An existing installation under `~/opensteuerauszug` (Windows: `%USERPROFILE%\opensteuerauszug`) (with `.venv`) is used automatically; otherwise the app installs into `tool/opensteuerauszug` in the project folder. A custom path can be set in the UI (field "Tool-Ordner", tool folder) or in `settings.json`, or alternatively via the environment variable `OPENSTEUER_TOOL_REPO`. The known ibflex fix (replacing `ibflex` with `ibflex2` in its `pyproject.toml`) is applied automatically on install and update, unless upstream already includes it: upstream now has the `ibflex2` entry itself, so the automatic fix only applies to older revisions. An older existing installation can be brought up to date in the app via "Tool aktualisieren". A locally applied ibflex fix is reset automatically in the process; untracked files are left untouched. On update, `config.toml`, `data/security_identifiers.csv` and your own files are never deleted (for ZIP installations, only *.py files under `src/` that upstream has removed are dropped; on error, the original state is restored).
 2. Start the app:
@@ -16,7 +53,9 @@ A local web UI (German only) that automates the [opensteuerauszug](https://githu
 
    The launchers set `STEUERAUSZUG_LAUNCHER=1` and restart the server automatically when the app asks for a restart after an update (exit code 3).
 
-The server binds to 127.0.0.1 only. Personal data (`settings.json`, `work/`, `output/`) is excluded via `.gitignore`. The Flex token is stored in plain text in `settings.json`, but is never logged and is only shown masked in the UI.
+   Alternatively, `python -m app.launcher` (in the `.venv`) starts the same server as the program, with a status window (if tkinter is available; otherwise console only) and the browser; options `--no-browser` and `--no-window` (or `STEUERAUSZUG_NO_BROWSER=1`).
+
+The server binds to 127.0.0.1 only. Personal data lives in the [data folder](#data-folder), not in the project folder. The Flex token is stored in plain text in `settings.json` (in the data folder), but is never logged and is only shown masked in the UI.
 
 ## App update
 
@@ -26,7 +65,7 @@ If the app was installed with `git clone`, it can update itself (section "App-Ve
 2. "Update installieren" (Install update) runs as a job with a live log: `git fetch`, then `git merge --ff-only` onto the upstream branch (`@{u}`, fallback `origin/main`). If `requirements.txt` changed, `pip install -r requirements.txt` runs; if that fails, the old state is restored with `git reset --keep`.
 3. "Jetzt neu starten" (Restart now) restarts the server (only when started via `start.bat` / `start.command`; otherwise close the window and start the script again). The page reloads itself.
 
-What it never does: no `reset --hard`, no `clean`, no force, no merge commits. The update is refused (with a message) if tracked files were changed locally (`git stash` first), if HEAD is detached, if the local branch is ahead of or has diverged from upstream, or if there is nothing new. `settings.json`, `work/`, `output/` and `.venv` are ignored by git and never touched. Without a git clone (e.g. ZIP download) the section only shows the clone command.
+What it never does: no `reset --hard`, no `clean`, no force, no merge commits. The update is refused (with a message) if tracked files were changed locally (`git stash` first), if HEAD is detached, if the local branch is ahead of or has diverged from upstream, or if there is nothing new. The data folder is outside the project; `.venv` and `tool/` are ignored by git and never touched. Without a git clone (e.g. ZIP download) the section only shows the clone command.
 
 ## Setting up the Flex query at IBKR (one time)
 
@@ -38,12 +77,13 @@ What it never does: no `reset --hard`, no `clean`, no force, no merge commits. T
 
 ## Usage
 
-- **Status**: The badge at the top shows whether the tool venv is found and `opensteuerauszug` is importable. The "Tool" section shows folder, origin, installation type and revision, and offers install or update.
+- **Status**: The badge at the top shows whether the tool venv is found (in the program: whether the bundled tool is present) and `opensteuerauszug` is importable. The "Tool" section shows folder, origin, installation type and revision, and offers install or update.
 - **Kurslisten** (price lists): A table of the years from 2020 with status (not present / XML / XML + SQLite). "Herunterladen/Aktualisieren" (Download/Update) starts a background job with a live log. If the SQLite conversion fails (known error `UNIQUE constraint failed: signs.kl_id`, e.g. 2025), the half-finished `.sqlite` is deleted and the year is treated as "XML".
 - **IBKR-Daten** (IBKR data): Upload the Flex XML by drag and drop, or fetch it via the Flex Web Service (save the token and query IDs under "Flex Web Service").
-- **Steuerauszug erzeugen** (Generate tax statement): Choose the year (default: previous year), tick the files, and click "Steuerauszug erzeugen". If the Kursliste is missing, it is downloaded first. Results: `output/<year>/Steuerauszug_<account>_<year>.pdf/.xml`.
+- **Steuerauszug erzeugen** (Generate tax statement): Choose the year (default: previous year), tick the files, and click "Steuerauszug erzeugen". If the Kursliste is missing, it is downloaded first. Results: `<data folder>/output/<year>/Steuerauszug_<account>_<year>.pdf/.xml`.
 - **Alles automatisch** (Everything automatically): Check/download the Kursliste, fetch all saved Flex queries, generate the tax statements.
 - **Verlauf** (History): All generated files per year with download links.
+- **Daten** (Data): shows the data folder; "Ordner öffnen" and "Ergebnisse öffnen" open it in the file manager, "App beenden" quits the app.
 
 Only one job runs at a time.
 
@@ -64,6 +104,13 @@ Windows: `.venv\Scripts\python.exe -m pytest -q`
 macOS/Linux: `.venv/bin/python -m pytest -q`
 
 Optional regression tests with real Flex XML files: set the environment variable `OPENSTEUER_REAL_DATA_DIR` to a folder; all `*.xml` files in it are tested read-only. Without the variable or without files, these tests are skipped.
+
+### Building and releasing the program
+
+- Build locally (PyInstaller, Python 3.12): `pip install -r requirements.txt -r packaging/requirements-build.txt`, then `python packaging/build_app.py`. Result: `dist/Steuerauszug-Assistent-<version>-<system>-<arch>.zip`. The commit of the bundled tool comes from `app/tool_version.json`; the line in `packaging/requirements-build.txt` must name the same commit (a test checks this).
+- Smoke test of the built program (not a pytest test): `python tests/smoke_app.py -- dist/Steuerauszug-Assistent/Steuerauszug-Assistent`.
+- Release: raise `app/VERSION`, add a section `## [vX.Y.Z] – <date> – <title>` to `CHANGELOG.md`, push the tag `vX.Y.Z` (or publish a release). The `release.yml` workflow checks tag and `app/VERSION`, creates the release with the notes from the changelog if needed, and attaches the ZIPs for Windows (x64) and macOS (arm64). Started by hand (workflow_dispatch) it only builds and tests and stores the ZIPs as an artifact.
+- Tool mode of the program: the program calls itself for the tool (`Steuerauszug-Assistent --run-tool <module> ...`; only `opensteuerauszug.steuerauszug` and `opensteuerauszug.kursliste` are allowed). `STEUERAUSZUG_BUNDLED_TOOL=1` forces bundled mode in the Python variant too (if `opensteuerauszug` is installed there).
 
 ## Changelog
 
