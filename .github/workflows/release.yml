@@ -3,6 +3,8 @@
 # Abschnitt von CHANGELOG.md). Es entstehen automatisch als Release-Dateien:
 #   - Steuerauszug-Assistent-<version>-windows-x64.zip (.exe)
 #   - Steuerauszug-Assistent-<version>-macos-arm64.zip (.app)
+#   - jeweils <zip>.sha256 (Prüfsumme; das Programm prüft sie vor dem Installieren eines Updates)
+# Die Namen entstehen in app/paths.py (asset_name); die Update-Suche im Programm wählt danach die passende Datei.
 # Von Hand gestartet (workflow_dispatch) wird nur gebaut und getestet, nichts veröffentlicht (Artefakt zum Download).
 name: Release
 
@@ -99,10 +101,12 @@ jobs:
         if: needs.verify.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ needs.verify.outputs.tag }}" "${{ steps.build.outputs.zip }}" --clobber
+        run: gh release upload "${{ needs.verify.outputs.tag }}" "${{ steps.build.outputs.zip }}" "${{ steps.build.outputs.sha }}" --clobber
       - name: Als Artefakt ablegen (Testlauf)
         if: needs.verify.outputs.publish != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: Steuerauszug-Assistent-${{ runner.os }}
-          path: ${{ steps.build.outputs.zip }}
+          path: |
+            ${{ steps.build.outputs.zip }}
+            ${{ steps.build.outputs.sha }}

@@ -28,6 +28,8 @@ ALLOWED_ROOTS = {"FlexQueryResponse", "FlexStatements"}
 async def lifespan(_app: FastAPI):
     # Datenordner anlegen und alte Daten aus dem Projektordner einmalig kopieren (auch bei uvicorn app.main:app)
     paths.startup(log=lambda m: print(m, flush=True))
+    if paths.is_frozen():
+        program_update.auto_check_if_due()      # höchstens einmal täglich, im Hintergrund, abschaltbar
     yield
 
 
@@ -40,6 +42,8 @@ RESTART_DELAY = 0.5
 # Launcher die App sauber, sobald quit_event gesetzt ist. Sonst (uvicorn direkt) endet der Prozess mit Code 0.
 quit_event = threading.Event()
 quit_via_event = False
+# Neustart des Programms (frozen): der Launcher startet sich nach dem sauberen Beenden neu (restart_requested).
+restart_requested = False
 # Injizierbar, damit Tests keinen Ordner öffnen.
 open_folder = _open_folder
 FOLDER_TARGETS = ("data", "output")
@@ -97,21 +101,30 @@ def api_app_update_status():
 @app.post("/api/app/update/check")
 def api_app_update_check():
     if paths.is_frozen():
-        try:
-            return program_update.check()
-        except program_update.NotSupported as exc:
-            raise HTTPException(409, str(exc))
+        return program_update.check()
     return selfupdate.check()
 
 
 @app.post("/api/app/update/apply")
 def api_app_update_apply():
     if paths.is_frozen():
-        try:
-            return _start("app-update", "Programm aktualisieren", program_update.job_apply())
-        except program_update.NotSupported as exc:
-            raise HTTPException(409, str(exc))
+        return _start("app-update", "Programm aktualisieren", program_update.job_apply())
     return _start("app-update", "App aktualisieren", selfupdate.job_apply())
+
+
+@app.post("/api/app/update/rollback")
+def api_app_update_rollback():
+    """Vorherige Programmversion wiederherstellen und neu starten (nur im Programm)."""
+    if not paths.is_frozen():
+        raise HTTPException(400, "Nur in der Programmversion verfügbar.")
+    if jobs.running():
+        raise HTTPException(409, "Es läuft ein Job. Bitte warten, bis er beendet ist.")
+    try:
+        version = program_update.rollback()
+    except program_update.UpdateError as exc:
+        raise HTTPException(409, str(exc))
+    _request_program_restart()
+    return {"restarting": True, "version": version}
 
 
 @app.post("/api/app/quit")
@@ -142,10 +155,22 @@ def api_open_folder(body: dict = Body(default={})):
     return {"opened": str(target)}
 
 
+def _request_program_restart() -> None:
+    """Programm-Modus: Server beenden, der Launcher startet das Programm neu (und wechselt dabei ggf. die Version)."""
+    global restart_requested
+    restart_requested = True
+    quit_event.set()
+    if not quit_via_event:      # ohne Launcher (uvicorn direkt): Prozess mit Neustart-Code beenden
+        selfupdate.schedule_restart(lambda code: exit_process(code), RESTART_DELAY)
+
+
 @app.post("/api/app/restart")
 def api_app_restart():
     if jobs.running():
         raise HTTPException(409, "Es läuft ein Job. Bitte warten, bis er beendet ist.")
+    if paths.is_frozen():
+        _request_program_restart()
+        return {"restarting": True}
     if not selfupdate.restart_supported():
         raise HTTPException(400, "Bitte das Fenster schließen und start.bat / start.command erneut starten.")
     selfupdate.schedule_restart(lambda code: exit_process(code), RESTART_DELAY)

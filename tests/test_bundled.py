@@ -211,8 +211,9 @@ def test_program_mode_update_status(client, monkeypatch):
     body = client.get("/api/app/update").json()
     assert body["mode"] == "program" and body["is_git"] is False
     assert body["version"] == "1.5.0" and body["releases_url"].endswith("/releases/latest")
-    assert client.post("/api/app/update/check").status_code == 409
-    assert client.post("/api/app/update/apply").status_code == 409
+    # Update-Suche liefert immer ein Ergebnis; ohne Verbindung steht die deutsche Meldung in "error"
+    res = client.post("/api/app/update/check")
+    assert res.status_code == 200 and res.json()["error"] and res.json()["update_available"] is False
 
 
 def test_program_update_is_separate_module():

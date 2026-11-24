@@ -12,11 +12,15 @@ atexit.register(shutil.rmtree, _SESSION_DATA, ignore_errors=True)
 os.environ["STEUERAUSZUG_DATA_DIR"] = str(Path(_SESSION_DATA) / "data")
 os.environ.pop("STEUERAUSZUG_BUNDLED_TOOL", None)
 os.environ.pop("STEUERAUSZUG_PORT", None)
+# Nie das echte GitHub ansprechen: Update-Suche zeigt auf einen Port ohne Server (Tests ersetzen das bei Bedarf)
+os.environ["STEUERAUSZUG_UPDATE_API"] = "http://127.0.0.1:9"
+os.environ.pop("STEUERAUSZUG_UPDATE_REPO", None)
+os.environ.pop("STEUERAUSZUG_DELEGATED", None)
 
 import pytest  # noqa: E402
 
-# Kurztest des gebauten Programms ist ein eigenes Skript, kein pytest-Test
-collect_ignore_glob = ["smoke_*.py"]
+# Kurztest und Update-End-to-End-Test des gebauten Programms sind eigene Skripte, keine pytest-Tests
+collect_ignore_glob = ["smoke_*.py", "update_e2e.py"]
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 

@@ -6,6 +6,7 @@ Dieses Modul importiert bewusst nur die Standardbibliothek.
 from __future__ import annotations
 
 import os
+import platform
 import shutil
 import sys
 from pathlib import Path
@@ -16,6 +17,37 @@ ENV_DATA_DIR = "STEUERAUSZUG_DATA_DIR"
 MIGRATION_MARKER = ".migriert-aus-projektordner"
 DEFAULT_PORT = 8765
 RELEASES_URL = "https://github.com/Kevegl/opensteuerauszug-webapp/releases/latest"
+
+
+def system_tag(platform_name: str | None = None) -> str:
+    """windows | macos | linux (so heißen die Systeme in den Namen der Release-Dateien)."""
+    name = platform_name or sys.platform
+    if name.startswith("win"):
+        return "windows"
+    if name == "darwin":
+        return "macos"
+    return "linux"
+
+
+def arch_tag(machine: str | None = None) -> str:
+    """x64 | arm64 (oder die rohe Angabe in Kleinbuchstaben)."""
+    m = (machine if machine is not None else platform.machine()).lower()
+    return {"x86_64": "x64", "amd64": "x64", "x64": "x64", "aarch64": "arm64", "arm64": "arm64"}.get(m, m or "unknown")
+
+
+def asset_name(version: str, system: str | None = None, arch: str | None = None) -> str:
+    """Name der ZIP-Datei im Release; build_app.py und die Update-Suche benutzen dieselbe Benennung."""
+    return f"{APP_NAME}-{version}-{system or system_tag()}-{arch or arch_tag()}.zip"
+
+
+def program_exe_relpath(system: str | None = None) -> Path:
+    """Pfad der Programmdatei relativ zum entpackten ZIP (bzw. zu versions/<version>/)."""
+    system = system or system_tag()
+    if system == "windows":
+        return Path(APP_NAME) / f"{APP_NAME}.exe"
+    if system == "macos":
+        return Path(f"{APP_NAME}.app") / "Contents" / "MacOS" / APP_NAME
+    return Path(APP_NAME) / APP_NAME
 
 
 def is_frozen() -> bool:

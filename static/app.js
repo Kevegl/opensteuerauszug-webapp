@@ -177,6 +177,53 @@ function appMsg(text, cls) {
   m.hidden = !text; m.textContent = text || ""; m.className = "hint " + (cls || "");
 }
 
+function renderProgram(u) {
+  const c = u.last_check;
+  const avail = !!(c && c.ok && c.update_available && !u.pending);
+  $("#app-info").textContent = `Programmversion: ${u.version || "unbekannt"}` +
+    (u.pending ? ` | Version ${u.pending} installiert, Neustart nötig` : "");
+  if (u.releases_url) $("#app-releases").href = u.releases_url;
+  $("#app-commits").hidden = true;
+  $("#btn-app-check").hidden = false;
+  const auto = $("#app-autocheck");
+  auto.checked = !!u.auto_check;
+  // Release-Notizen nur als Text (textContent), nie als HTML
+  const notes = $("#app-notes");
+  notes.hidden = $("#app-notes-title").hidden = !(avail && c.notes);
+  notes.textContent = avail ? (c.notes || "") : "";
+  $("#app-notes-title").textContent = avail ? `Neu in Version ${c.latest}:` : "";
+  const apply = $("#btn-app-apply");
+  apply.hidden = !(avail && c.installable);
+  apply.disabled = busy;
+  apply.textContent = avail ? `Update auf ${c.latest} installieren` + (c.asset_size ? ` (${fmtSize(c.asset_size)})` : "") : "Update installieren";
+  const restart = $("#btn-app-restart");
+  restart.hidden = !u.pending;
+  restart.disabled = busy;
+  const rb = $("#btn-app-rollback");
+  rb.hidden = !u.can_rollback;
+  rb.disabled = busy;
+  rb.textContent = u.previous ? `Vorherige Version wiederherstellen (${u.previous})` : "Vorherige Version wiederherstellen";
+  const failed = $("#app-failed");
+  failed.hidden = !u.failed;
+  failed.textContent = u.failed ? `Update auf ${u.failed.version} ist fehlgeschlagen, die vorherige Version läuft.` +
+    (u.failed.reason ? ` Grund: ${u.failed.reason}` : "") : "";
+  $("#update-badge").hidden = !(avail || u.pending);
+  $("#update-badge").textContent = u.pending ? "Neustart nötig" : (avail ? `Update ${c.latest} verfügbar` : "");
+  if (u.pending) {
+    appMsg(`Version ${u.pending} ist installiert. Zum Aktivieren die App neu starten; startet sie nicht, kehrt das Programm automatisch zur jetzigen Version zurück.`, "app-ok");
+  } else if (c && !c.ok) {
+    appMsg(c.error, "app-err");
+  } else if (avail && !c.installable) {
+    appMsg(`Version ${c.latest} ist verfügbar, aber nicht installierbar: ${c.install_problem || ""}`, "app-warn");
+  } else if (avail) {
+    appMsg(`Neue Version ${c.latest} verfügbar.`, "app-warn");
+  } else if (c) {
+    appMsg("Aktuell." + (c.checked_at ? ` Zuletzt geprüft: ${fmtDate(c.checked_at)}` : ""), "app-ok");
+  } else {
+    appMsg("");
+  }
+}
+
 function renderApp(u) {
   appState = u;
   const info = $("#app-info");
@@ -184,13 +231,8 @@ function renderApp(u) {
   $("#app-program").hidden = !program;
   $("#app-nogit").hidden = u.is_git || program;
   $("#btn-app-check").hidden = !u.is_git;
-  if (program) {
-    info.textContent = `Programmversion: ${u.version || "unbekannt"}`;
-    if (u.releases_url) $("#app-releases").href = u.releases_url;
-    $("#btn-app-apply").hidden = true; $("#btn-app-restart").hidden = true; $("#app-commits").hidden = true;
-    appMsg("");
-    return;
-  }
+  if (program) { renderProgram(u); return; }
+  $("#update-badge").hidden = true;
   if (!u.is_git) {
     info.textContent = "Update nicht verfügbar: " + (u.reason || "unbekannt");
     $("#btn-app-apply").hidden = true; $("#btn-app-restart").hidden = true; $("#app-commits").hidden = true;
@@ -245,31 +287,51 @@ async function checkAppUpdate() {
   btn.disabled = false;
 }
 
-async function restartApp() {
-  if (!confirm("Die App jetzt neu starten?")) return;
-  setBusy(true);
-  appMsg("Neustart läuft ...", "app-warn");
-  try { await api("/api/app/restart", json("POST", {})); }
-  catch (e) { appMsg("FEHLER: " + e.message, "app-err"); setBusy(false); return; }
-  const deadline = Date.now() + 60000;
-  await new Promise((r) => setTimeout(r, 1500));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Wartet, bis der alte Server weg ist und der neue antwortet, und lädt die Seite dann neu.
+async function waitForRestart() {
+  const downBy = Date.now() + 20000;
+  while (Date.now() < downBy) {
+    try { const r = await fetch("/api/health", { cache: "no-store" }); if (!r.ok) break; } catch (_) { break; }
+    await sleep(500);
+  }
+  const deadline = Date.now() + 90000;
   while (Date.now() < deadline) {
     try {
-      const r = await fetch("/api/status", { cache: "no-store" });
+      const r = await fetch("/api/health", { cache: "no-store" });
       if (r.ok) { location.reload(); return; }
     } catch (_) { /* Server noch nicht erreichbar */ }
-    await new Promise((r) => setTimeout(r, 1000));
+    await sleep(1000);
   }
-  appMsg("Die App ist nach 60 s nicht wieder erreichbar. Bitte start.bat / start.command prüfen.", "app-err");
+  appMsg("Die App ist nach 90 s nicht wieder erreichbar. Bitte das Programm bzw. start.bat / start.command prüfen.", "app-err");
   setBusy(false);
+}
+
+async function restartApp(path = "/api/app/restart", question = "Die App jetzt neu starten?") {
+  if (!confirm(question)) return;
+  setBusy(true);
+  appMsg("Neustart läuft ...", "app-warn");
+  try { await api(path, json("POST", {})); }
+  catch (e) { appMsg("FEHLER: " + e.message, "app-err"); setBusy(false); return; }
+  await sleep(1000);
+  await waitForRestart();
 }
 
 $("#btn-app-check").onclick = checkAppUpdate;
 $("#btn-app-apply").onclick = async () => {
-  if (!confirm("Update jetzt installieren? Nur Fast-Forward, eigene Daten (Einstellungen, Uploads, Ergebnisse) bleiben unberührt.")) return;
+  const prog = appState && appState.mode === "program";
+  if (!confirm(prog ? "Update jetzt herunterladen und installieren? Aktiviert wird es erst nach dem Neustart; eigene Daten (Einstellungen, Uploads, Ergebnisse) bleiben unberührt."
+    : "Update jetzt installieren? Nur Fast-Forward, eigene Daten (Einstellungen, Uploads, Ergebnisse) bleiben unberührt.")) return;
   await runJob("/api/app/update/apply", {});
 };
-$("#btn-app-restart").onclick = restartApp;
+$("#btn-app-restart").onclick = () => restartApp();
+$("#btn-app-rollback").onclick = () => restartApp("/api/app/update/rollback",
+  `Zur vorherigen Version ${appState && appState.previous || ""} zurückkehren? Die App wird dabei neu gestartet; Ihre Daten bleiben unberührt.`);
+$("#app-autocheck").onchange = async (e) => {
+  try { await api("/api/settings", json("PUT", { auto_update_check: e.target.checked })); }
+  catch (err) { appMsg("FEHLER: " + err.message, "app-err"); }
+};
 
 // ---- Ordner öffnen / App beenden ----
 async function openFolder(which) {

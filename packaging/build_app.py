@@ -4,15 +4,17 @@
 Läuft in GitHub Actions (.github/workflows/release.yml), geht aber auch lokal:
 
   pip install -r requirements.txt -r packaging/requirements-build.txt
-  python packaging/build_app.py     -> dist/Steuerauszug-Assistent-<version>-<system>-<arch>.zip
+  python packaging/build_app.py     -> dist/Steuerauszug-Assistent-<version>-<system>-<arch>.zip (+ .sha256)
+  python packaging/build_app.py --out <Ordner>   baut nach <Ordner>/build und <Ordner>/dist (z. B. für Tests)
 
 Das Programm enthält Python, die App, das Startprogramm (app/launcher.py) und das Tool opensteuerauszug samt
 Abhängigkeiten. Der Commit des Tools steht nur in app/tool_version.json; fehlt er in der Build-Umgebung, wird er
 hier installiert (pip install "opensteuerauszug @ git+<repo>@<commit>").
 """
+import argparse
+import hashlib
 import json
 import os
-import platform
 import re
 import shutil
 import subprocess
@@ -21,8 +23,11 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from app import paths  # noqa: E402  (nur Standardbibliothek; Benennung der Release-Dateien an einer Stelle)
+
 APP = ROOT / "app"
-NAME = "Steuerauszug-Assistent"
+NAME = paths.APP_NAME
 BUNDLE_ID = "io.github.kevegl.steuerauszug-assistent"
 # Pakete mit Daten, Schriften oder dynamischen Importen: komplett einsammeln
 COLLECT_ALL = ["opensteuerauszug", "reportlab", "pdf417gen", "barcode", "ibflex", "holidays", "pydantic_xml", "pypdf"]
@@ -97,10 +102,13 @@ def pyinstaller_cmd(dist, build, system):
 
 
 def main():
-    system = {"Windows": "windows", "Darwin": "macos"}.get(platform.system(), "linux")
-    arch = platform.machine().lower().replace("x86_64", "x64").replace("amd64", "x64").replace("aarch64", "arm64")
-    build = ROOT / "build"
-    dist = ROOT / "dist"
+    ap = argparse.ArgumentParser(description="Baut das Programm (PyInstaller) und das Release-ZIP samt .sha256")
+    ap.add_argument("--out", type=Path, default=ROOT, help="Ausgabeordner mit build/ und dist/ (Standard: Projektordner)")
+    args = ap.parse_args()
+    system = paths.system_tag()
+    arch = paths.arch_tag()
+    build = args.out.resolve() / "build"
+    dist = args.out.resolve() / "dist"
     pin = tool_pin()
     ensure_tool(pin)
     shutil.rmtree(build, ignore_errors=True)
@@ -108,7 +116,7 @@ def main():
     print(f"PyInstaller baut {NAME} {version()} für {system}-{arch} …", flush=True)
     subprocess.run(pyinstaller_cmd(dist, build, system), check=True, cwd=str(ROOT))
 
-    out = dist / f"{NAME}-{version()}-{system}-{arch}.zip"
+    out = dist / paths.asset_name(version(), system, arch)
     if system == "macos":
         # ditto erhält Symlinks und Signatur des .app-Pakets
         subprocess.run(["ditto", "-c", "-k", "--keepParent", str(dist / f"{NAME}.app"), str(out)], check=True)
@@ -118,14 +126,20 @@ def main():
         with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
             for f in sorted(folder.rglob("*")):
                 z.write(f, Path(NAME) / f.relative_to(folder))
+    # Prüfsumme für die Integritätsprüfung beim Programm-Update (Format wie sha256sum: "<hash>  <datei>")
+    digest = hashlib.sha256()
+    with open(out, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            digest.update(block)
+    sha_file = out.with_name(out.name + ".sha256")
+    sha_file.write_text(f"{digest.hexdigest()}  {out.name}\n", encoding="utf-8")
     print("Fertig:", out, f"({out.stat().st_size / 1e6:.1f} MB)")
+    print("Prüfsumme:", sha_file.name, digest.hexdigest())
     # Pfade für den Kurztest und den Upload in GitHub Actions
-    exe = dist / NAME / (NAME + ".exe" if system == "windows" else NAME)
-    if system == "macos":
-        exe = dist / f"{NAME}.app" / "Contents" / "MacOS" / NAME
+    exe = dist / paths.program_exe_relpath(system)
     if os.environ.get("GITHUB_OUTPUT"):
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
-            f.write(f"zip={out}\nexe={exe}\n")
+            f.write(f"zip={out}\nsha={sha_file}\nexe={exe}\n")
 
 
 if __name__ == "__main__":

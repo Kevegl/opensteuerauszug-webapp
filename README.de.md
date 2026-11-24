@@ -25,7 +25,7 @@ Beide Varianten nutzen denselben [Datenordner](#datenordner), man kann also ohne
    - **Mac (Gatekeeper)**: Rechtsklick auf die App > **Öffnen** > **Öffnen**. Alternativ: Systemeinstellungen > Datenschutz & Sicherheit > **Dennoch öffnen**.
 5. Beenden: im Statusfenster "Beenden" (oder das Fenster schliessen) bzw. in der Oberfläche "App beenden".
 
-Das Tool opensteuerauszug ist im Programm enthalten (die Karte "Tool" zeigt "mitgeliefert, Version <Commit>"); Installieren und Aktualisieren des Tools entfallen. Aktualisiert wird das Programm vorerst von Hand: neue ZIP-Datei von der Release-Seite laden und den alten Programmordner ersetzen. Die Daten bleiben im Datenordner erhalten. Ein automatisches Programm-Update folgt in einer späteren Version.
+Das Tool opensteuerauszug ist im Programm enthalten (die Karte "Tool" zeigt "mitgeliefert, Version <Commit>"); Installieren und Aktualisieren des Tools entfallen. Das Programm aktualisiert sich per Klick, siehe [Programm-Update](#programm-update). Die Daten bleiben im Datenordner erhalten.
 
 Ein Windows-Programm ohne Konsole schreibt sein Protokoll nach `<Datenordner>/logs/app.log`.
 
@@ -57,7 +57,18 @@ Die Umgebungsvariable `STEUERAUSZUG_DATA_DIR` überschreibt den Ordner. Darin li
 
 Der Server bindet ausschliesslich an 127.0.0.1. Persönliche Daten liegen im [Datenordner](#datenordner), nicht im Projektordner. Der Flex-Token liegt im Klartext in `settings.json` (im Datenordner), wird aber nie geloggt und in der UI nur maskiert angezeigt.
 
-## App-Update
+## Programm-Update
+
+Die Karte "App-Version" des Programms (nicht der Python-Variante, die sich per Git aktualisiert, siehe unten) aktualisiert das Programm über die GitHub-Releases:
+
+1. **Prüfen**: Einmal täglich beim Start prüft das Programm im Hintergrund, ob es ein neueres Release gibt (`api.github.com`, verglichen wird nur die Versionsnummer; die Anfrage enthält keine persönlichen Daten, der User-Agent ist `Steuerauszug-Assistent/<Version>`). Ein Hinweis im Kopf zeigt "Update verfügbar". Die automatische Prüfung lässt sich abschalten ("Automatisch nach Updates suchen"); "Nach Updates suchen" prüft jederzeit. Das Ergebnis liegt in `<Datenordner>/updates/status.json`.
+2. **Nur auf Klick installieren**: "Update installieren" lädt das ZIP für Ihr System (Limit 200 MB) und prüft die SHA-256-Prüfsumme gegen die Datei `<zip>.sha256` des Releases; stimmt sie nicht, wird nichts installiert. Das ZIP wird sicher entpackt (keine absoluten Pfade, kein `..`) nach `<Datenordner>/versions/<Version>/`. Die Release-Notizen erscheinen vorher als reiner Text.
+3. **Neustart**: "Jetzt neu starten" startet das Programm neu (ohne zweiten Browser-Tab); die Seite lädt sich selbst neu. Die neue Version läuft im Probebetrieb: Sie muss sich innerhalb von 60 Sekunden bei `/api/health` melden. Tut sie das nicht, wird sie beendet und **die vorherige Version startet automatisch wieder**; die Karte zeigt dann "Update auf X ist fehlgeschlagen, vorherige Version läuft". Eine fehlgeschlagene Version wird nicht automatisch erneut versucht, nur durch erneutes Klicken auf "Update installieren".
+4. **"Vorherige Version wiederherstellen"** kehrt zur Version vor dem Update zurück (Knopf nur, wenn es eine gibt). Es bleiben höchstens zwei Versionen erhalten (die aktuelle und die vorherige); ältere werden aus `versions/` gelöscht.
+
+Auch eine von Hand heruntergeladene und gestartete neuere Version funktioniert: Die höhere Version gewinnt immer. Ihre Daten (Einstellungen, Uploads, Ergebnisse) berührt ein Update nie. `STEUERAUSZUG_UPDATE_API` / `STEUERAUSZUG_UPDATE_REPO` leiten die Prüfung um (für Tests).
+
+## App-Update (Python-Variante)
 
 Wurde die App per `git clone` installiert, kann sie sich selbst aktualisieren (Bereich "App-Version" in der Oberfläche):
 

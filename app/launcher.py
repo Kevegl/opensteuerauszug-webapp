@@ -13,7 +13,9 @@ Das Startprogramm
   * öffnet nur den Browser, wenn die App schon läuft (keine doppelte Instanz),
   * meldet einen fremd belegten Port,
   * startet sonst den Server (uvicorn) im selben Prozess in einem Thread, nur auf 127.0.0.1,
-  * beendet sich, wenn die App über "Beenden" im Fenster oder "App beenden" im Browser geschlossen wird.
+  * beendet sich, wenn die App über "Beenden" im Fenster oder "App beenden" im Browser geschlossen wird,
+  * wechselt beim Start auf eine per Update installierte Version (siehe app/versions.py) und startet sich beim
+    Neustart aus der App (Update, "Vorherige Version wiederherstellen") selbst neu.
 
 Der Tool-Modus (--run-tool, --tool-kursliste-dir) wird ganz am Anfang behandelt, bevor irgendetwas
 anderes importiert wird: das Programm ruft sich damit selbst als Subprozess für opensteuerauszug auf.
@@ -42,7 +44,7 @@ import urllib.error  # noqa: E402
 import urllib.request  # noqa: E402
 import webbrowser  # noqa: E402
 
-from app import paths  # noqa: E402
+from app import paths, versions  # noqa: E402
 
 TITLE = "Steuerauszug-Assistent"
 APP_ID = "steuerauszug-assistent"
@@ -61,7 +63,7 @@ def say(text=""):
 def fail(text):
     """Fehlermeldung: Konsole/Protokoll und, wo es keine Konsole gibt, zusätzlich als Fenster."""
     say("FEHLER: " + text)
-    if not FROZEN:
+    if not FROZEN or os.environ.get(versions.TRIAL_ENV) == "1":    # Probebetrieb: nur ins Protokoll
         return
     try:
         if sys.platform.startswith("win"):
@@ -103,8 +105,10 @@ def redirect_output(data_dir):
 
 
 class Launcher:
-    def __init__(self, port, open_browser=True, use_window=True):
+    def __init__(self, port, open_browser=True, use_window=True, argv=None):
         self.port = port
+        self.argv = list(argv or [])
+        self.spawn = versions.popen_detached      # injizierbar (Tests)
         self.url = f"http://127.0.0.1:{port}/"
         self.open_browser = open_browser
         self.use_window = use_window
@@ -234,7 +238,26 @@ class Launcher:
         except KeyboardInterrupt:
             pass
         self.shutdown()
+        if self.appmain is not None and getattr(self.appmain, "restart_requested", False):
+            return self.restart()
         say(f"{TITLE} wurde beendet.")
+        return 0
+
+    def restart_command(self):
+        args = [a for a in self.argv]
+        if "--no-browser" not in args:
+            args.append("--no-browser")         # die Seite lädt sich selbst neu, kein zweiter Tab
+        return [sys.executable, *args]
+
+    def restart(self):
+        """Startet das Programm neu (unabhängiger Prozess). Der neue Prozess wechselt ggf. die Version."""
+        env = versions.clean_env(drop=(versions.DELEGATED_ENV, versions.TRIAL_ENV))
+        say(f"{TITLE} startet neu ...")
+        try:
+            self.spawn(self.restart_command(), env)
+        except OSError as exc:
+            fail(f"Der Neustart ist fehlgeschlagen: {exc}. Bitte das Programm von Hand starten.")
+            return 1
         return 0
 
     def make_window(self):
@@ -266,11 +289,16 @@ def main(argv=None):
         fail(f"Der Datenordner {paths.data_dir()} kann nicht angelegt werden: {exc}")
         return 1
     redirect_output(data)
+    raw_argv = sys.argv[1:] if argv is None else list(argv)
+    if FROZEN and versions.delegate(data, paths.version(), sys.executable, raw_argv, port=paths.port(),
+                                    say=say) == "delegated":
+        return 0            # eine andere installierte Version läuft (Update, Rückkehr oder neuere Version)
     paths.migrate_legacy(data=data, log=say)
     launcher = Launcher(
         paths.port(),
         open_browser=not (args.no_browser or env_flag("STEUERAUSZUG_NO_BROWSER")),
         use_window=not (args.no_window or env_flag("STEUERAUSZUG_NO_WINDOW")),
+        argv=raw_argv,
     )
     return launcher.run()
 

@@ -9,7 +9,10 @@
 <body>
 <header>
   <h1>Steuerauszug-Assistent</h1>
-  <div id="status" class="badge">Prüfe ...</div>
+  <div class="badges">
+    <a id="update-badge" class="badge warn" href="#sec-app" hidden>Update verfügbar</a>
+    <div id="status" class="badge">Prüfe ...</div>
+  </div>
 </header>
 <main>
   <section class="card" id="sec-tool">
@@ -30,14 +33,18 @@
       <pre class="code">git clone https://github.com/kevegl/opensteuerauszug-webapp.git</pre>
     </div>
     <div id="app-program" hidden>
-      <p class="hint">Neue Versionen des Programms gibt es auf der Release-Seite:
-        <a id="app-releases" href="https://github.com/Kevegl/opensteuerauszug-webapp/releases/latest" target="_blank" rel="noopener">github.com/Kevegl/opensteuerauszug-webapp/releases/latest</a></p>
+      <p class="hint app-warn" id="app-failed" hidden></p>
+      <p class="hint" id="app-notes-title" hidden></p>
+      <pre class="notes" id="app-notes" hidden></pre>
+      <label class="check"><input type="checkbox" id="app-autocheck"> Automatisch nach Updates suchen (höchstens einmal täglich)</label>
+      <p class="hint">Alle Versionen: <a id="app-releases" href="https://github.com/Kevegl/opensteuerauszug-webapp/releases/latest" target="_blank" rel="noopener">GitHub Releases</a></p>
     </div>
     <ul id="app-commits" class="commits" hidden></ul>
     <div class="row">
       <button id="btn-app-check" hidden>Nach Updates suchen</button>
       <button id="btn-app-apply" class="primary" hidden>Update installieren</button>
       <button id="btn-app-restart" class="primary" hidden>Jetzt neu starten</button>
+      <button id="btn-app-rollback" class="subtle" hidden>Vorherige Version wiederherstellen</button>
     </div>
   </section>
 

@@ -23,6 +23,8 @@ DEFAULTS: dict[str, Any] = {
     "flex_token": "",
     # [{"name": "Konto U123", "query_id": "123456"}]
     "flex_queries": [],
+    # Programmversion: höchstens einmal täglich beim Start nach einem Update suchen
+    "auto_update_check": True,
 }
 
 _lock = threading.Lock()
@@ -64,6 +66,7 @@ def load_settings(path: Path | None = None) -> dict[str, Any]:
     explicit = result.get("tool_repo")
     result["tool_repo"], result["tool_repo_source"] = resolve_tool_repo(explicit if isinstance(explicit, str) else "")
     result["flex_queries"] = _clean_queries(result.get("flex_queries"))
+    result["auto_update_check"] = bool(result.get("auto_update_check", True))
     return result
 
 
@@ -127,4 +130,6 @@ def update_settings(current: dict[str, Any], patch: dict[str, Any]) -> dict[str,
         new["flex_token"] = ""
     if "flex_queries" in patch:
         new["flex_queries"] = _clean_queries(patch["flex_queries"])
+    if isinstance(patch.get("auto_update_check"), bool):
+        new["auto_update_check"] = patch["auto_update_check"]
     return new

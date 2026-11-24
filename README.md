@@ -25,7 +25,7 @@ Both variants use the same [data folder](#data-folder), so you can switch withou
    - **Mac (Gatekeeper)**: right-click the app > **Open** > **Open**. Alternatively: System Settings > Privacy & Security > **Open Anyway**.
 5. Quit: "Beenden" in the status window (or close the window), or "App beenden" in the UI.
 
-The opensteuerauszug tool is included (the "Tool" card shows "mitgeliefert, Version <commit>" = bundled); installing or updating the tool is not needed. For now the program is updated by hand: download the new ZIP from the releases page and replace the old program folder. Your data stays in the data folder. An automatic program update will follow in a later version.
+The opensteuerauszug tool is included (the "Tool" card shows "mitgeliefert, Version <commit>" = bundled); installing or updating the tool is not needed. The program updates itself with one click, see [Program update](#program-update). Your data stays in the data folder.
 
 A program without a console writes its log to `<data folder>/logs/app.log`.
 
@@ -57,7 +57,18 @@ The environment variable `STEUERAUSZUG_DATA_DIR` overrides the folder. It contai
 
 The server binds to 127.0.0.1 only. Personal data lives in the [data folder](#data-folder), not in the project folder. The Flex token is stored in plain text in `settings.json` (in the data folder), but is never logged and is only shown masked in the UI.
 
-## App update
+## Program update
+
+The "App-Version" card of the program (not the Python variant, which updates via git, see below) updates the program from the GitHub releases:
+
+1. **Check**: once a day at startup the program checks in the background whether a newer release exists (`api.github.com`, only the version number is compared; the request carries no personal data, the User-Agent is `Steuerauszug-Assistent/<version>`). A badge in the header shows "Update verfügbar". The automatic check can be switched off ("Automatisch nach Updates suchen"); "Nach Updates suchen" checks at any time. The result is kept in `<data folder>/updates/status.json`.
+2. **Install only on click**: "Update installieren" downloads the ZIP for your system (limit 200 MB) and checks its SHA-256 checksum against the `<zip>.sha256` file of the release; on a mismatch nothing is installed. The ZIP is unpacked safely (no absolute paths, no `..`) into `<data folder>/versions/<version>/`. The release notes are shown as plain text before installing.
+3. **Restart**: "Jetzt neu starten" restarts the program (without a second browser tab); the page reloads itself. The new version runs a trial: it must report to `/api/health` within 60 seconds. If it does not, it is stopped and **the previous version starts again automatically**; the card then shows "Update auf X ist fehlgeschlagen, vorherige Version läuft". A failed version is not tried again automatically, only by clicking "Update installieren" again.
+4. **"Vorherige Version wiederherstellen"** returns to the version before the update (button only when there is one). At most two versions are kept (the current and the previous one); older ones are deleted from `versions/`.
+
+A newer version downloaded and started by hand also works: the higher version always wins. Your data (settings, uploads, results) is never touched by an update. `STEUERAUSZUG_UPDATE_API` / `STEUERAUSZUG_UPDATE_REPO` redirect the check (for tests).
+
+## App update (Python variant)
 
 If the app was installed with `git clone`, it can update itself (section "App-Version" in the UI):
 
